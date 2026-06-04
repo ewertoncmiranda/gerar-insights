@@ -8,7 +8,6 @@ Aplicacao Python responsavel por ser o cerebro analitico do ecossistema. Operand
 - Demonstra integração inter-linguagem (Java ↔ SQS ↔ Python).
 - Mostra práticas: containerização, configuração por env, retries, logging e testes.
 
-
 ## RESPONSABILIDADES PRINCIPAIS
 
 1. Consumo Robusto (SQS) - Le mensagens da fila sem gargalos, processa e apaga de forma eficiente.

@@ -1,0 +1,40 @@
+# IDEs
+.idea/
+.vscode/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+
+# Environment files locais (Mantenha env/.env.docker fora do ignore se for commitar)
+.env.local
+.env
+
+# Pytest
+.pytest_cache/
+
+
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+.gitattributes
+
