@@ -30,7 +30,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ secrets.DOCKER_USERNAME }}/gestor-ativos-brutos
+            ${{ secrets.DOCKER_USERNAME }}/gerar-insights
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
@@ -46,14 +46,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gestor-ativos-brutos:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gestor-ativos-brutos:buildcache,mode=max
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gerar-insights:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gerar-insights:buildcache,mode=max
 
       - name: Docker Hub Description
         uses: peter-evans/dockerhub-description@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: ${{ secrets.DOCKER_USERNAME }}/gestor-ativos-brutos
-          short-description: "Gestor de Ativos Brutos"
+          repository: ${{ secrets.DOCKER_USERNAME }}/gerar-insights
+          short-description: "Gerar Insights"
           readme-filepath: ./README.md
