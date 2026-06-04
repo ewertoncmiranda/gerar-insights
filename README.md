@@ -51,9 +51,6 @@ Quer que eu:
 - Gere um `.env` alternativo pronto para rodar via Docker Compose com variáveis já ajustadas para container-network (DB_URL com `mysql:3306` e `SERVER_PORT=8091`)?
 - Adicione exemplos de comandos `awslocal`/`aws` para criar/verificar fila?
 
-
-
-
 ## VARIAVEIS DE AMBIENTE
 
 ### Defaults para docker: localstack:4566, mysql:3306
