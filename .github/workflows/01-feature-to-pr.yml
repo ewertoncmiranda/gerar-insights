@@ -1,0 +1,52 @@
+name: Auto PR Feature to Develop
+
+on:
+  push:
+    branches:
+      - 'feature**'
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Pull Request
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const title = `Merge ${branch} into develop`;
+            const body = `## Automated PR\n\nThis PR was automatically created from the **${branch}** branch.\n\n### Changes\n- Feature implementation from \`${branch}\`\n\n**Please review the changes and merge if approved.**`;
+
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              base: 'develop',
+              state: 'open',
+            });
+
+            if (prs.data.length === 0) {
+              const pr = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                head: branch,
+                base: 'develop',
+                body: body,
+              });
+
+              console.log(`✅ Pull Request criado: #${pr.data.number}`);
+              console.log(`Link: ${pr.data.html_url}`);
+            } else {
+              console.log(`ℹ️ PR já existe: #${prs.data[0].number}`);
+            }
