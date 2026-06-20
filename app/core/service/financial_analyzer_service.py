@@ -1,51 +1,49 @@
 from logging import Logger
 
+from app.core.analysis.insight_payload import InsightPayloadBuilder
+from app.core.analysis.market_snapshot import MarketSnapshot
+from app.core.analysis.recommendation import RecommendationPolicy
+from app.core.analysis.technical_context import TechnicalContextAnalyzer
+from app.core.analysis.valuation import ValuationAnalyzer
+
 
 class FinancialAnalyzerService:
-    def __init__(self,logger: Logger):
+    def __init__(
+        self,
+        logger: Logger,
+        valuation_analyzer: ValuationAnalyzer | None = None,
+        technical_analyzer: TechnicalContextAnalyzer | None = None,
+        recommendation_policy: RecommendationPolicy | None = None,
+        payload_builder: InsightPayloadBuilder | None = None,
+    ):
         self.logger = logger
+        self.valuation_analyzer = valuation_analyzer or ValuationAnalyzer()
+        self.technical_analyzer = technical_analyzer or TechnicalContextAnalyzer()
+        self.recommendation_policy = recommendation_policy or RecommendationPolicy()
+        self.payload_builder = payload_builder or InsightPayloadBuilder()
 
     def gerar_insight_fundamentalista(self, ativo: dict) -> dict:
-        simbolo = ativo.get("symbol", "UNKNOWN")
-        preco = ativo.get("regularMarketPrice")
-        lpa = ativo.get("earningsPerShare")
-        max52 = ativo.get("fiftyTwoWeekHigh")
+        snapshot = MarketSnapshot.from_payload(ativo)
+        self.logger.info(
+            f"Analisando ativo {snapshot.symbol} "
+            f"(Preco: {snapshot.price}, LPA: {snapshot.earnings_per_share})"
+        )
 
-        self.logger.info(f"Analisando ativo {simbolo} (Preço: {preco}, LPA: {lpa})")
+        if not snapshot.has_valid_fundamentals():
+            return self._resultado_nulo(snapshot.symbol)
 
-        # Fallbacks caso falte dados fundamentais
-        if not preco or not lpa or lpa <= 0:
-            return self._resultado_nulo(simbolo)
-
-        # 1. Filtro de Benjamin Graham
-        # Fórmula clássica de Preço Justo: Valor = LPA * (8.5 + 2g)
-        # Vamos assumir 'g' (crescimento estimado) = 5% ao ano como conservador
-        crescimento_estimado = 5
-        preco_justo_graham = lpa * (8.5 + 2 * crescimento_estimado)
-        
-        margem_seguranca = ((preco_justo_graham - preco) / preco_justo_graham) * 100
-
-        # Recomendação Baseada na Margem de Segurança
-        if margem_seguranca > 20:
-            recomendacao = "COMPRA"
-        elif 0 <= margem_seguranca <= 20:
-            recomendacao = "NEUTRO"
-        else:
-            recomendacao = "VENDA"
-
-        # Outros insights para armazenar no JSON extra
-        detalhes = {
-            "earnings_yield_percent": (lpa / preco) * 100,
-            "desconto_maxima_52w_percent": ((max52 - preco) / max52) * 100 if max52 else None,
-            "crescimento_projetado_utilizado": crescimento_estimado
-        }
+        valuation = self.valuation_analyzer.analyze(snapshot)
+        technical_context = self.technical_analyzer.analyze(snapshot)
+        recommendation = self.recommendation_policy.evaluate(snapshot, valuation, technical_context)
+        details = self.payload_builder.build(snapshot, valuation, technical_context, recommendation)
+        base_scenario = valuation["cenario_base"]
 
         return {
-            "simbolo": simbolo,
-            "preco_justo_graham": round(preco_justo_graham, 4),
-            "margem_seguranca_percent": round(margem_seguranca, 4),
-            "recomendacao": recomendacao,
-            "detalhes_json": detalhes
+            "simbolo": snapshot.symbol,
+            "preco_justo_graham": base_scenario["preco_justo"],
+            "margem_seguranca_percent": base_scenario["margem_seguranca_percent"],
+            "recomendacao": recommendation["recomendacao"],
+            "detalhes_json": details,
         }
 
     def _resultado_nulo(self, simbolo: str) -> dict:
@@ -53,6 +51,9 @@ class FinancialAnalyzerService:
             "simbolo": simbolo,
             "preco_justo_graham": None,
             "margem_seguranca_percent": None,
-            "recomendacao": "SEM DADOS",
-            "detalhes_json": {"aviso": "Dados fundamentais insuficientes ou lucro negativo"}
+            "recomendacao": "SEM_DADOS",
+            "detalhes_json": {
+                "versao_payload": "2.0",
+                "aviso": "Dados fundamentais insuficientes ou lucro negativo",
+            },
         }
