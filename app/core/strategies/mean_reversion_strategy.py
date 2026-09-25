@@ -1,6 +1,3 @@
-from app.core.strategies.dto.market_data import MarketData
-
-
 # mean_reversion_strategy.py
 class MeanReversionStrategy:
     """
@@ -15,18 +12,24 @@ class MeanReversionStrategy:
     - Z-score indica que o preço está esticado (+1.5 ou maior)
     """
 
-    def should_buy(self, data: MarketData, z_score):
+    def should_buy(self, price: float, z_score: float, fifty_two_week_low: float | None) -> bool:
         """
         Compra quando:
         - z-score indica desconto anormal
         - Preço está próximo ao mínimo de 52 semanas
         """
-        return z_score < -1.5 and data.price <= data.fifty_two_week_low * 1.1
+        if fifty_two_week_low is None:
+            return False
+        return z_score < -1.5 and price <= fifty_two_week_low * 1.1
 
-    def should_sell(self, data: MarketData, z_score):
+    def should_sell(self, price: float, z_score: float, fifty_two_week_high: float | None) -> bool:
         """
         Vende quando:
         - z-score indica sobrecompra
         - Preço está próximo ao topo de 52 semanas
         """
-        return z_score > 1.5 or data.price >= data.fifty_two_week_high * 0.95
+        if z_score > 1.5:
+            return True
+        if fifty_two_week_high is None:
+            return False
+        return price >= fifty_two_week_high * 0.95

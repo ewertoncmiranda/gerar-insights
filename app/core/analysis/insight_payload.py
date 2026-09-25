@@ -2,11 +2,18 @@ from app.core.analysis.market_snapshot import MarketSnapshot
 
 
 class InsightPayloadBuilder:
-    def build(self, snapshot: MarketSnapshot, valuation: dict, technical_context: dict, recommendation: dict) -> dict:
+    def build(
+        self,
+        snapshot: MarketSnapshot,
+        valuation: dict,
+        technical_context: dict,
+        recommendation: dict,
+        sinal_tecnico: dict | None = None,
+    ) -> dict:
         context_payload = dict(technical_context)
         context_payload.pop("_raw", None)
 
-        return {
+        payload = {
             "versao_payload": "2.0",
             "resumo": {
                 "recomendacao": recommendation["recomendacao"],
@@ -28,3 +35,13 @@ class InsightPayloadBuilder:
             "desconto_maxima_52w_percent": technical_context["desconto_maxima_52w_percent"],
             "crescimento_projetado_utilizado": valuation["crescimento_base"],
         }
+
+        if sinal_tecnico is not None:
+            payload["contexto_tecnico_serie"] = sinal_tecnico
+            # Hoisting para o nivel de topo: ConsolidadorAnaliseAcao.java so calcula media
+            # de campos numericos de primeiro nivel de detalhes_json (nao entra em objetos aninhados).
+            payload["media_movel"] = sinal_tecnico["media_movel"]
+            payload["z_score_fechamento"] = sinal_tecnico["z_score_fechamento"]
+            payload["score_volume"] = sinal_tecnico["score_volume"]
+
+        return payload

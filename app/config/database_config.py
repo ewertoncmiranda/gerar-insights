@@ -50,5 +50,3 @@ class ConfigDatabase:
                     )
                     print(error_msg)
                     raise Exception(error_msg) from e
-
-
