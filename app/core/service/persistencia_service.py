@@ -5,8 +5,8 @@ from app.external.database.repository_history import HistoricoRepository
 from app.external.database.entity.historico_entity import HistoricoAcaoEntity
 class PersistenciaHistoricoService:
 
-    def __init__(self):
-        self.repository = HistoricoRepository()
+    def __init__(self, repository: HistoricoRepository | None = None):
+        self.repository = repository or HistoricoRepository()
 
     def registrar_snapshot(self, db: Session, snapshot: SnapshotAcao):
         entidade = HistoricoAcaoEntity(

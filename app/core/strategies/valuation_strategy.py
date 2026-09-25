@@ -1,5 +1,3 @@
-from app.core.strategies.dto.market_data import MarketData
-
 # valuation_strategy.py
 class ValuationStrategy:
     """
@@ -11,16 +9,16 @@ class ValuationStrategy:
     É um dos métodos mais usados por analistas fundamentalistas e value investors.
     """
 
-    def should_buy(self, data: MarketData, sector_pe):
+    def should_buy(self, price_earnings: float, sector_pe: float) -> bool:
         """
         Compra quando:
         - O P/L é pelo menos 20% menor que o P/L médio do setor
         """
-        return data.price_earnings < sector_pe * 0.80
+        return price_earnings < sector_pe * 0.80
 
-    def should_sell(self, data: MarketData, sector_pe):
+    def should_sell(self, price_earnings: float, sector_pe: float) -> bool:
         """
         Vende quando:
         - A ação deixou de estar barata e voltou ao valor justo
         """
-        return data.price_earnings > sector_pe * 1.1
+        return price_earnings > sector_pe * 1.1

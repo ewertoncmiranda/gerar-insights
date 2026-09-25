@@ -1,10 +1,13 @@
 from logging import Logger
 
+from sqlalchemy.orm import Session
+
 from app.core.analysis.insight_payload import InsightPayloadBuilder
 from app.core.analysis.market_snapshot import MarketSnapshot
 from app.core.analysis.recommendation import RecommendationPolicy
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
 from app.core.analysis.valuation import ValuationAnalyzer
+from app.core.service.serie_tecnica_service import SerieTecnicaService
 
 
 class FinancialAnalyzerService:
@@ -15,14 +18,16 @@ class FinancialAnalyzerService:
         technical_analyzer: TechnicalContextAnalyzer | None = None,
         recommendation_policy: RecommendationPolicy | None = None,
         payload_builder: InsightPayloadBuilder | None = None,
+        serie_tecnica_service: SerieTecnicaService | None = None,
     ):
         self.logger = logger
         self.valuation_analyzer = valuation_analyzer or ValuationAnalyzer()
         self.technical_analyzer = technical_analyzer or TechnicalContextAnalyzer()
         self.recommendation_policy = recommendation_policy or RecommendationPolicy()
         self.payload_builder = payload_builder or InsightPayloadBuilder()
+        self.serie_tecnica_service = serie_tecnica_service or SerieTecnicaService()
 
-    def gerar_insight_fundamentalista(self, ativo: dict) -> dict:
+    def gerar_insight_fundamentalista(self, db: Session, ativo: dict) -> dict:
         snapshot = MarketSnapshot.from_payload(ativo)
         self.logger.info(
             f"Analisando ativo {snapshot.symbol} "
@@ -35,7 +40,8 @@ class FinancialAnalyzerService:
         valuation = self.valuation_analyzer.analyze(snapshot)
         technical_context = self.technical_analyzer.analyze(snapshot)
         recommendation = self.recommendation_policy.evaluate(snapshot, valuation, technical_context)
-        details = self.payload_builder.build(snapshot, valuation, technical_context, recommendation)
+        sinal_tecnico = self.serie_tecnica_service.avaliar(db, snapshot)
+        details = self.payload_builder.build(snapshot, valuation, technical_context, recommendation, sinal_tecnico)
         base_scenario = valuation["cenario_base"]
 
         return {

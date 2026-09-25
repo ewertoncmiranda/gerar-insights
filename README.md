@@ -10,13 +10,13 @@ Aplicacao Python responsavel por ser o cerebro analitico do ecossistema. Operand
 
 ## RESPONSABILIDADES PRINCIPAIS
 
-1. Consumo Robusto (SQS) - Le mensagens da fila sem gargalos, processa e apaga de forma eficiente.
-2. Historico Bruto - Armazena snapshots de mercado diarios dos ativos na tabela historico_acoes.
-3. Calculo de Insights - Aplica calculos financeiros (Preco Justo Benjamin Graham, Margem de Seguranca) e emite recomendacoes (COMPRA/VENDA/NEUTRO).
+1. Consumo Robusto (SQS) - Le mensagens de duas filas (cotacoes e series historicas) sem gargalos, processa e apaga de forma eficiente.
+2. Historico Bruto - Armazena snapshots de mercado diarios dos ativos na tabela historico_acoes e os candles OHLCV na tabela serie_historica.
+3. Calculo de Insights - Aplica calculos financeiros (Preco Justo Benjamin Graham, Margem de Seguranca) e sinal tecnico (media movel, z-score, score de volume via Momentum/Mean Reversion) e emite recomendacoes (COMPRA/VENDA/NEUTRO).
 
 ## TECNOLOGIAS E LIBS
 
-- boto3: SDK AWS para acesso a SQS e DynamoDB
+- boto3: SDK AWS para acesso a SQS
 - SQLAlchemy + PyMySQL: Gerenciamento de conexoes e persistencia em MySQL
 - python-dotenv: Carregamento de variaveis de ambiente via arquivo .env
 - python-json-logger: Logs estruturados
@@ -32,9 +32,28 @@ Aplicacao Python responsavel por ser o cerebro analitico do ecossistema. Operand
 - O worker faz logs em stdout; quando containerizado, utilize docker logs gerar-insights.
 - Configurar LOG_LEVEL=DEBUG para debug mais detalhado.
 ### Fluxo entre gestor-ativos-brutos e gerar-insights
-- Producer (pode ser o gestor-ativos-brutos ou outro sistema) coloca mensagens na fila SQS tratar-ativos.
-- gerar-insights lê mensagens da fila SQS, executa as estratégias (mean reversion, momentum, valuation) e escreve resultados em MySQL.
+- `gestor-ativos-brutos` coloca cotações na fila SQS `tratar-ativos` e, quando chamado via `/ativos/robusto/{ativo}`, também publica a série histórica OHLCV na fila `sqs-registrar-series-historicas`.
+- `gerar-insights` consome as duas filas: cotações alimentam o insight fundamentalista (Graham) e o sinal técnico (lido de `serie_historica`); a série histórica alimenta a tabela `serie_historica` usada por esse sinal técnico.
+- O resultado combinado (fundamentos + sinal técnico) é gravado numa única linha de `insight_acao`, que o `gestor-ativos-brutos` consolida em `GET /analises/{simbolo}/analise`.
 - O Java app expõe métricas/health; se necessário, gerar-insights pode consultar o endpoint do Java para sincronização/health.
+
+## Sinal técnico sobre séries históricas
+
+Além do insight fundamentalista (Graham), cada cotação processada também calcula um sinal técnico a partir dos candles já persistidos em `serie_historica`:
+
+- **Média móvel (20 candles)**, **z-score do último fechamento** e **score de volume** (`volume atual / média do volume na janela`), calculados em `TechnicalSeriesAnalyzer` (`app/core/analysis/technical_series.py`).
+- Esses números alimentam `MomentumStrategy` e `MeanReversionStrategy` (`app/core/strategies/`), que já existiam no projeto mas nunca eram chamadas — `SerieTecnicaService` (`app/core/service/serie_tecnica_service.py`) é quem orquestra tudo isso.
+- Quando o símbolo ainda não tem 20 candles em `serie_historica`, o sinal é omitido (não é erro) — o insight fundamentalista continua sendo gerado normalmente.
+- O resultado é anexado ao `detalhes_json` do insight (bloco `contexto_tecnico_serie`, mais os campos `media_movel`, `z_score_fechamento` e `score_volume` no nível de topo, para que o lado Java consolide automaticamente sem nenhuma mudança de código).
+
+## Dependência de infraestrutura (`infra-b3-ecossystem`)
+
+O sinal técnico depende de dois recursos que **não são provisionados por este repositório**, e sim pelo repositório `infra-b3-ecossystem` anexado ao ecossistema:
+
+- **Fila SQS `sqs-registrar-series-historicas`**, definida via Terraform em `infra/main.tf` (módulo `sqs`, entrada `registrar_series_historicas`).
+- **Tabela MySQL `serie_historica`**, criada em `mysql-init/1 - schema.sql`.
+
+Sem aplicar esse Terraform (`terraform apply` no diretório `infra/`) e sem rodar esse script de inicialização do MySQL, o segundo consumidor de fila registrado em `main.py` não tem fila para ler nem tabela para gravar — o worker sobe normalmente, mas o sinal técnico nunca é calculado (fica sempre ausente, como se não houvesse candles).
 
 ### Problemas comuns e solução
 #### Worker não consome mensagens:
@@ -63,11 +82,6 @@ AWS/LocalStack:
 - AWS_REGION (default: sa-east-1)
 - AWS_ACCESS_KEY_ID (default: test)
 - AWS_SECRET_ACCESS_KEY (default: test)
-
-#### DynamoDB:
-- DYNAMO_ENDPOINT (default: http://localstack:4566)
-  Local: http://localhost:4566
-- DYNAMO_TABLE_NAME (default: insights-refinados)
 
 ##### Banco de Dados:
 - DB_DRIVER (default: mysql+pymysql)
@@ -99,7 +113,6 @@ AWS/LocalStack:
    DB_HOST=localhost
    DB_PORT=3305
    LOCALSTACK_ENDPOINT=http://localhost:4566
-   DYNAMO_ENDPOINT=http://localhost:4566
 
 4. Executar:
    python main.py
@@ -117,15 +130,17 @@ gerar-insights/
   app/
     config/
       settings.py              Configuracoes centralizadas (SOLID)
-      aws_config.py            Clientes boto3 (SQS, DynamoDB)
+      aws_config.py            Clientes boto3 (SQS)
       database_config.py       SqlAlchemy engine
       config_logger.py         Setup de logs
     core/
-      - Logica de indicadores e insights
-    entrypoint/
-      entrypoint_sqs.py        Consumer SQS
+      core_processor.py        Consumo das filas SQS (ativos + series historicas) e orquestracao
+      analysis/                Calculos puros: valuation Graham, contexto tecnico, sinal tecnico de serie
+      strategies/               Momentum e Mean Reversion (usadas pelo sinal tecnico de serie)
+      service/                  Servicos de aplicacao (FinancialAnalyzerService, SerieHistoricaService, SerieTecnicaService, PersistenciaHistoricoService)
+      mapper/                   Conversao de payload bruto para objetos de dominio
     external/
-      - Integracao com servicos externos
+      database/                 Entidades e repositorios SQLAlchemy
   main.py                       Ponto de entrada
   requirements.txt              Dependencias
   Dockerfile                    Imagem Docker

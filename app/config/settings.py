@@ -46,10 +46,13 @@ class Settings:
 
         self.localstack_endpoint = os.getenv('LOCALSTACK_ENDPOINT', default_localstack_endpoint)
         self.queue_name = os.getenv('QUEUE_NAME', 'tratar-ativos')
+        self.historical_series_queue_name = os.getenv(
+            'HISTORICAL_SERIES_QUEUE_NAME',
+            'sqs-registrar-series-historicas'
+        )
         self.aws_region = os.getenv('AWS_REGION', 'sa-east-1')
         self.aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', 'test')
         self.aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY', 'test')
-        self.dynamo_endpoint = os.getenv('DYNAMO_ENDPOINT', self.localstack_endpoint)
         self.db_driver = os.getenv('DB_DRIVER', 'mysql+pymysql')
         self.db_host = os.getenv('DB_HOST', default_db_host)
         self.db_port = _get_int('DB_PORT', default_db_port)
