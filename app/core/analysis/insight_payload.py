@@ -1,4 +1,5 @@
 from app.core.analysis.market_snapshot import MarketSnapshot
+from app.core.analysis.versao_regra import VERSAO_REGRA
 
 
 class InsightPayloadBuilder:
@@ -15,6 +16,8 @@ class InsightPayloadBuilder:
 
         payload = {
             "versao_payload": "2.1",
+            # Qual regra produziu este insight; o diario de sinais agrupa por ela.
+            "versao_regra": VERSAO_REGRA,
             "resumo": {
                 "recomendacao": recommendation["recomendacao"],
                 "nivel_risco": recommendation["nivel_risco"],
