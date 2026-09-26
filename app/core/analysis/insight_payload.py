@@ -14,7 +14,7 @@ class InsightPayloadBuilder:
         context_payload.pop("_raw", None)
 
         payload = {
-            "versao_payload": "2.0",
+            "versao_payload": "2.1",
             "resumo": {
                 "recomendacao": recommendation["recomendacao"],
                 "nivel_risco": recommendation["nivel_risco"],

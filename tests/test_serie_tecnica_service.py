@@ -8,9 +8,11 @@ from app.core.service.serie_tecnica_service import SerieTecnicaService, JANELA_M
 
 
 class _CandleFake:
-    def __init__(self, fechamento: float, volume: int):
+    def __init__(self, fechamento: float, volume: int, fechamento_ajustado=None):
         self.fechamento = fechamento
         self.volume = volume
+        # None simula candle sem adjustedClose vindo da BRAPI
+        self.fechamento_ajustado = fechamento_ajustado
 
 
 class _RepositorioFake:
@@ -69,3 +71,58 @@ class TestSerieTecnicaService:
         )
 
         assert resultado["sinal_reversao"] == "VENDA_TECNICA"
+
+
+class TestAjustePorProventos:
+    """O preco ajustado e o que deve alimentar o calculo tecnico.
+
+    Dividendo e desdobramento derrubam o preco sem ninguem vender. Usando o
+    fechamento bruto, a media movel e o z-score passam a medir o provento em
+    vez do comportamento do papel.
+    """
+
+    def test_usa_o_fechamento_ajustado_quando_existe(self):
+        # bruto constante em 10, ajustado constante em 9: a media tem que ser 9
+        candles = [_CandleFake(10.0, 1000, fechamento_ajustado=9.0) for _ in range(JANELA_MINIMA)]
+        service = SerieTecnicaService(repository=_RepositorioFake(candles))
+
+        resultado = service.avaliar(db=None, snapshot=_snapshot(price=9.0))
+
+        assert resultado["media_movel"] == 9.0
+
+    def test_cai_para_o_bruto_quando_nao_ha_ajustado(self):
+        candles = [_CandleFake(10.0, 1000) for _ in range(JANELA_MINIMA)]
+        service = SerieTecnicaService(repository=_RepositorioFake(candles))
+
+        resultado = service.avaliar(db=None, snapshot=_snapshot(price=10.0))
+
+        assert resultado["media_movel"] == 10.0
+
+    def test_degrau_de_provento_no_bruto_nao_contamina_o_z_score(self):
+        """Serie ajustada estavel, bruta com degrau no ex-dividendo.
+
+        Sem a correcao o z-score enxergaria uma anomalia que nao existe.
+        """
+        candles = []
+        for i in range(JANELA_MINIMA):
+            # bruto salta de 10 para 11 na metade; ajustado fica sempre em 10
+            bruto = 10.0 if i < JANELA_MINIMA // 2 else 11.0
+            candles.append(_CandleFake(bruto, 1000, fechamento_ajustado=10.0))
+
+        service = SerieTecnicaService(repository=_RepositorioFake(candles))
+        resultado = service.avaliar(db=None, snapshot=_snapshot(price=10.0))
+
+        assert resultado["media_movel"] == 10.0
+        # serie ajustada constante -> desvio zero -> z-score zero
+        assert resultado["z_score_fechamento"] == 0.0
+
+    def test_mistura_de_candles_com_e_sem_ajustado_nao_quebra(self):
+        candles = [
+            _CandleFake(10.0, 1000, fechamento_ajustado=10.0 if i % 2 == 0 else None)
+            for i in range(JANELA_MINIMA)
+        ]
+        service = SerieTecnicaService(repository=_RepositorioFake(candles))
+
+        resultado = service.avaliar(db=None, snapshot=_snapshot(price=10.0))
+
+        assert resultado["amostras"] == JANELA_MINIMA
