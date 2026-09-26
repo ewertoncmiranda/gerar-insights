@@ -24,6 +24,8 @@ class TestSnapshotAcao:
             "marketCap": 100000000,
             "priceEarnings": 8.0,
             "earningsPerShare": 4.0,
+            "schemaVersion": "1.0",
+            "dedupKey": "abc123",
         }
 
     @pytest.fixture
@@ -50,6 +52,8 @@ class TestSnapshotAcao:
         assert snapshot.valor_mercado == 100000000
         assert snapshot.preco_lucro == 8.0
         assert snapshot.lucro_por_acao == 4.0
+        assert snapshot.schema_version == "1.0"
+        assert snapshot.dedup_key == "abc123"
 
     def test_snapshot_criacao_parcial(self, payload_parcial):
         """Testa criação de snapshot com dados parciais"""

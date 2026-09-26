@@ -1,4 +1,5 @@
 import json
+import hashlib
 import time
 from dataclasses import dataclass
 from logging import Logger
@@ -82,6 +83,8 @@ class CoreProcessor:
                 receipt_handle = message["ReceiptHandle"]
                 try:
                     payload = json.loads(message["Body"])
+                    if nome_fila == "ativos" and not payload.get("dedupKey"):
+                        payload["dedupKey"] = self._chave_legada(payload)
 
                     with self.session_factory() as session:
                         try:
@@ -126,6 +129,7 @@ class CoreProcessor:
 
     def salvar_insight(self, session, insight_dict):
         entidade: InsightEntity = InsightEntity(
+            dedup_key=insight_dict["dedup_key"],
             simbolo=insight_dict["simbolo"],
             preco_justo_graham=insight_dict["preco_justo_graham"],
             margem_seguranca_percent=insight_dict["margem_seguranca_percent"],
@@ -133,3 +137,9 @@ class CoreProcessor:
             detalhes_json=insight_dict["detalhes_json"],
         )
         self.insight_repository.salvar(session, entidade)
+
+    @staticmethod
+    def _chave_legada(payload: dict) -> str:
+        """Compatibilidade para mensagens anteriores ao schemaVersion 1.0."""
+        canonico = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(canonico.encode("utf-8")).hexdigest()

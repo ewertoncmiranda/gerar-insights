@@ -35,7 +35,7 @@ class FinancialAnalyzerService:
         )
 
         if not snapshot.has_valid_fundamentals():
-            return self._resultado_nulo(snapshot.symbol)
+            return self._resultado_nulo(snapshot.symbol, ativo.get("dedupKey"))
 
         valuation = self.valuation_analyzer.analyze(snapshot)
         technical_context = self.technical_analyzer.analyze(snapshot)
@@ -45,6 +45,7 @@ class FinancialAnalyzerService:
         base_scenario = valuation["cenario_base"]
 
         return {
+            "dedup_key": ativo.get("dedupKey"),
             "simbolo": snapshot.symbol,
             "preco_justo_graham": base_scenario["preco_justo"],
             "margem_seguranca_percent": base_scenario["margem_seguranca_percent"],
@@ -52,8 +53,9 @@ class FinancialAnalyzerService:
             "detalhes_json": details,
         }
 
-    def _resultado_nulo(self, simbolo: str) -> dict:
+    def _resultado_nulo(self, simbolo: str, dedup_key: str | None) -> dict:
         return {
+            "dedup_key": dedup_key,
             "simbolo": simbolo,
             "preco_justo_graham": None,
             "margem_seguranca_percent": None,

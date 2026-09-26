@@ -10,6 +10,7 @@ class PersistenciaHistoricoService:
 
     def registrar_snapshot(self, db: Session, snapshot: SnapshotAcao):
         entidade = HistoricoAcaoEntity(
+            dedup_key=snapshot.dedup_key,
             simbolo=snapshot.simbolo,
             preco_abertura=snapshot.preco_abertura,
             preco_fechamento=snapshot.preco_fechamento,
