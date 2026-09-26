@@ -1,7 +1,14 @@
 """Motor de avaliacao de um sinal. Puro: sem banco, sem rede, sem relogio.
 
 Pergunta que responde: "se alguem tivesse agido neste sinal, quanto teria
-ganho ou perdido depois de h pregoes, comparado com o BOVA11 e com o CDI?"
+ganho ou perdido depois de h pregoes, comparado com a carteira e com o CDI?"
+
+Os dois benchmarks respondem perguntas diferentes:
+  - CDI: valeu a pena sair da renda fixa?
+  - carteira (media simples dos ativos monitorados, mesmas datas): a regra
+    escolheu MELHOR do que pegar todos por igual, ou so pegou a alta geral?
+    Substituiu o BOVA11 em 2026-09-26: e a comparacao certa para uma regra
+    que escolhe dentro desse universo, e usa preco que ja e coletado.
 
 Convencoes (decisoes D1 e D2 do plano, 2026-09-26):
 
@@ -73,12 +80,18 @@ class ResultadoHorizonte:
     preco_saida: Decimal
     retorno_bruto: Decimal
     retorno_liquido: Decimal
-    retorno_bova11: Decimal | None
+    retorno_carteira: Decimal | None
     retorno_cdi: Decimal | None
-    excesso_bova11: Decimal | None
+    excesso_carteira: Decimal | None
+    ativos_na_carteira: int | None
     excesso_cdi: Decimal | None
     acerto: bool | None
     evento_suspeito: bool
+
+
+# Abaixo disso a "media da carteira" e fina demais para representar o
+# mercado; o excesso fica nulo em vez de comparar com 2 ou 3 papeis.
+MINIMO_ATIVOS_CARTEIRA = 5
 
 
 def avaliar(
@@ -86,7 +99,7 @@ def avaliar(
     recomendacao: str | None,
     pregoes: list[Pregao],
     horizonte: int,
-    benchmark: list[Pregao] | None = None,
+    carteira: dict[str, list[Pregao]] | None = None,
     cdi_diario: dict[date, Decimal] | None = None,
     custo_ida_e_volta: Decimal = CUSTO_IDA_E_VOLTA_PADRAO,
 ) -> ResultadoHorizonte | None:
@@ -110,7 +123,9 @@ def avaliar(
     retorno_bruto = saida.fechamento / entrada.abertura - 1
     retorno_liquido = retorno_bruto - custo_ida_e_volta
 
-    retorno_bova11 = _retorno_no_periodo(benchmark, entrada.data, saida.data)
+    media_carteira, ativos_na_carteira = _media_da_carteira(carteira, entrada.data, saida.data)
+    # Comprar a carteira inteira tambem paga custo: compara liquido com liquido.
+    retorno_carteira = media_carteira - custo_ida_e_volta if media_carteira is not None else None
     retorno_cdi = _cdi_acumulado(cdi_diario, entrada.data, saida.data)
 
     sentido = direcao(recomendacao)
@@ -124,31 +139,41 @@ def avaliar(
         preco_saida=saida.fechamento,
         retorno_bruto=_q(retorno_bruto),
         retorno_liquido=_q(retorno_liquido),
-        retorno_bova11=_q(retorno_bova11),
+        retorno_carteira=_q(retorno_carteira),
         retorno_cdi=_q(retorno_cdi),
-        excesso_bova11=_q(retorno_liquido - retorno_bova11) if retorno_bova11 is not None else None,
+        excesso_carteira=_q(retorno_liquido - retorno_carteira) if retorno_carteira is not None else None,
+        ativos_na_carteira=ativos_na_carteira,
         excesso_cdi=_q(retorno_liquido - retorno_cdi) if retorno_cdi is not None else None,
         acerto=acerto,
         evento_suspeito=_tem_salto_suspeito(serie[indice_sinal : indice_saida + 1]),
     )
 
 
-def _retorno_no_periodo(
-    serie: list[Pregao] | None, data_entrada: date, data_saida: date
-) -> Decimal | None:
-    """Mesma convencao do ativo: abertura da entrada ao fechamento da saida.
+def _media_da_carteira(
+    carteira: dict[str, list[Pregao]] | None, data_entrada: date, data_saida: date
+) -> tuple[Decimal | None, int | None]:
+    """Media simples do retorno bruto dos ativos da carteira no periodo.
 
-    Datas precisam existir na serie do benchmark; sem elas o excesso fica
-    nulo em vez de comparar periodos diferentes.
+    Mesma convencao do sinal (abertura da entrada ao fechamento da saida).
+    Entra so quem tem preco nas DUAS datas - comparar periodos diferentes nao
+    e comparacao - e sem salto suspeito na janela: um desdobramento de outro
+    papel nao pode contaminar a regua. Devolve (media, quantos entraram).
     """
-    if not serie:
-        return None
-    por_data = {p.data: p for p in serie}
-    entrada = por_data.get(data_entrada)
-    saida = por_data.get(data_saida)
-    if not entrada or not saida or not entrada.abertura:
-        return None
-    return saida.fechamento / entrada.abertura - 1
+    if not carteira:
+        return None, None
+    retornos = []
+    for serie in carteira.values():
+        janela = sorted(
+            (p for p in serie if data_entrada <= p.data <= data_saida), key=lambda p: p.data
+        )
+        if not janela or janela[0].data != data_entrada or janela[-1].data != data_saida:
+            continue
+        if not janela[0].abertura or _tem_salto_suspeito(janela):
+            continue
+        retornos.append(janela[-1].fechamento / janela[0].abertura - 1)
+    if len(retornos) < MINIMO_ATIVOS_CARTEIRA:
+        return None, len(retornos)
+    return sum(retornos) / len(retornos), len(retornos)
 
 
 def _cdi_acumulado(
