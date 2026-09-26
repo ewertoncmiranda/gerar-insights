@@ -1,12 +1,14 @@
-from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, BigInteger, UniqueConstraint
 from app.config.database_config import Base
 from datetime import datetime
 
 
 class HistoricoAcaoEntity(Base):
     __tablename__ = "historico_acoes"
+    __table_args__ = (UniqueConstraint("dedup_key", name="uq_historico_acoes_dedup_key"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    dedup_key = Column(String(64))
 
     simbolo = Column(String(10), nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)

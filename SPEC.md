@@ -293,9 +293,9 @@ Critérios de aceite de referência (devem virar testes):
 
 | ID | Requisito | Status |
 |---|---|---|
-| NFR-01 | **Atomicidade:** todas as escritas de uma mensagem ficam em uma única transação | NÃO ATENDIDO (`ISS-01`) |
-| NFR-02 | **Idempotência:** reprocessar a mesma mensagem não gera duplicatas | PARCIAL (só série histórica) (`ISS-02`) |
-| NFR-03 | **Resiliência:** mensagens que falham repetidamente vão para uma DLQ após N tentativas | NÃO ATENDIDO (`ISS-06`) |
+| NFR-01 | **Atomicidade:** todas as escritas de uma mensagem ficam em uma única transação | ATENDIDO (2026-09-26) |
+| NFR-02 | **Idempotência:** reprocessar a mesma mensagem não gera duplicatas | ATENDIDO por `dedup_key` e índices únicos (2026-09-26) |
+| NFR-03 | **Resiliência:** mensagens que falham repetidamente vão para uma DLQ após N tentativas | ATENDIDO na infraestrutura (2026-09-26) |
 | NFR-04 | **Observabilidade:** logs estruturados em JSON, nível configurável, sem duplicação | NÃO ATENDIDO (`ISS-08`) |
 | NFR-05 | **Segurança:** nenhum segredo ou ambiente virtual dentro da imagem; container sem root | NÃO ATENDIDO (`ISS-04`) |
 | NFR-06 | **Testabilidade:** `app/core/analysis` com cobertura ≥ 90%; suíte verde no CI | NÃO ATENDIDO (`ISS-03`, `ISS-05`) |
@@ -312,8 +312,8 @@ Severidade: **Crítico** (perda/corrupção de dados ou segurança), **Alto**, *
 
 | ID | Sev. | Problema | Evidência | Impacto | Correção sugerida | Status |
 |---|---|---|---|---|---|---|
-| ISS-01 | Crítico | Repositórios fazem `commit()` interno, anulando a transação do processor | `app/external/database/repository_history.py:12`, `app/external/database/insight_repository.py:15` vs `app/core/core_processor.py:89` | Se o insight falhar após salvar o histórico, a mensagem volta para a fila e o histórico é gravado de novo (duplicado) | Repositórios só fazem `add`/`flush`; o commit fica exclusivamente no `CoreProcessor` | ABERTO |
-| ISS-02 | Alto | Fila de ativos sem idempotência (SQS entrega *at-least-once*) | `historico_acoes` e `insight_acao` sem chave natural | Duplicatas, estatísticas distorcidas | Chave única (ex.: `simbolo` + `regularMarketTime` ou `MessageId`) + upsert/ignore | ABERTO |
+| ISS-01 | Crítico | Repositórios faziam `commit()` interno, anulando a transação do processor | Repositórios agora usam `flush`; `CoreProcessor` é o único dono do commit | Evita persistência parcial | Coberto por teste da unidade de trabalho | CONCLUIDO (2026-09-26) |
+| ISS-02 | Alto | Fila de ativos sem idempotência (SQS entrega *at-least-once*) | `dedup_key` propagada pelo produtor ou calculada de forma determinística no consumidor | Evita duplicatas em reentrega | Índices únicos + consulta idempotente | CONCLUIDO (2026-09-26) |
 | ISS-03 | Alto | Suíte de testes quebrada e sem cobertura do domínio atual | `tests/test_trading_service.py:8`, `tests/test_aggregator_service.py:8`, `tests/test_e2e_flow.py:70,128` importam `TradingService`/`AggregatorService`, que não existem | Falha na coleta do pytest; regras financeiras sem rede de segurança | Remover/reescrever testes legados; criar testes para `app/core/analysis/*` e `historical_series` | ABERTO (confirmado por leitura; pytest não executado) |
 | ISS-04 | Crítico | Sem `.dockerignore`; `COPY . .` leva `.env.local`, `.venv`, `venv-local`, `.git`, `.idea` para a imagem pública; roda como root | `Dockerfile:5` | Vazamento de credenciais no Docker Hub; imagem grande | `.dockerignore`, build multi-stage, `USER` não-root | ABERTO |
 | ISS-05 | Alto | CI publica a imagem (inclusive `latest`) sem rodar testes/lint | `.github/workflows/02-docker-build-push.yml:40,46` | Imagem quebrada em produção | Job `test` (pytest + ruff) como pré-requisito; `latest` só a partir de `main`/tag | ABERTO |
@@ -359,9 +359,9 @@ Cada tarefa referencia os itens que resolve. Ordem sugerida: fases 0 → 4. Dent
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-10 | Tirar os `commit()` dos repositórios; unidade de trabalho única no `CoreProcessor` | ISS-01, NFR-01 | *Dado* uma falha forçada em `salvar_insight`, *quando* a mensagem é processada, *então* nenhuma linha nova existe em `historico_acoes` | TASK-04 | ABERTO |
-| TASK-11 | Chave de idempotência para snapshots e insights | ISS-02, NFR-02 | Processar a mesma mensagem 2× gera 1 linha em cada tabela | TASK-10, DEC-01 | ABERTO |
-| TASK-12 | DLQ com `maxReceiveCount` configurável | ISS-06, NFR-03 | Mensagem que sempre falha chega à DLQ após N tentativas | — | ABERTO |
+| TASK-10 | Tirar os `commit()` dos repositórios; unidade de trabalho única no `CoreProcessor` | ISS-01, NFR-01 | *Dado* uma falha forçada em `salvar_insight`, *quando* a mensagem é processada, *então* nenhuma linha nova existe em `historico_acoes` | TASK-04 | CONCLUIDO (2026-09-26) |
+| TASK-11 | Chave de idempotência para snapshots e insights | ISS-02, NFR-02 | Processar a mesma mensagem 2× gera 1 linha em cada tabela | TASK-10, DEC-01 | CONCLUIDO (2026-09-26) |
+| TASK-12 | DLQ com `maxReceiveCount` configurável | ISS-06, NFR-03 | Mensagem que sempre falha chega à DLQ após N tentativas | — | CONCLUIDO na infra (2026-09-26) |
 | TASK-13 | Logger único, JSON, nível via `Settings.log_level` | ISS-08, NFR-04 | Cada evento aparece uma vez; `LOG_LEVEL=DEBUG` habilita logs de debug | — | ABERTO |
 | TASK-14 | Reutilizar o cliente SQS; retry do banco via `Settings` | ISS-09, ISS-10, NFR-07 | Uma instância de cliente por processo; nenhum `os.getenv` fora de `settings.py` | — | ABERTO |
 | TASK-15 | Migrations com Alembic (ou `create_all` controlado por flag) | ISS-07 | Banco vazio + `alembic upgrade head` cria as 3 tabelas usadas | DEC-01 | ABERTO |

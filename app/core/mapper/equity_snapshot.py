@@ -1,6 +1,8 @@
 class SnapshotAcao:
 
     def __init__(self, payload: dict):
+        self.schema_version = payload.get("schemaVersion", "0")
+        self.dedup_key = payload.get("dedupKey")
         self.simbolo = payload.get("symbol")
         self.preco_abertura = payload.get("regularMarketOpen")
         self.preco_fechamento = payload.get("regularMarketPrice")

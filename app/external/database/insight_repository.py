@@ -11,8 +11,18 @@ class InsightRepository:
         self.logger = logger
 
     def salvar(self, db: Session, entidade: InsightEntity):
+        if getattr(entidade, "dedup_key", None):
+            existente = (
+                db.query(InsightEntity)
+                .filter(InsightEntity.dedup_key == entidade.dedup_key)
+                .one_or_none()
+            )
+            if existente is not None:
+                self.logger.info(
+                    f"Insight duplicado para {entidade.simbolo} ignorado ({entidade.dedup_key})"
+                )
+                return existente
         db.add(entidade)
-        db.commit()
-        db.refresh(entidade)
+        db.flush()
         self.logger.info(f"Insight para o ativo {entidade.simbolo} salvo no banco com sucesso.")
         return entidade
