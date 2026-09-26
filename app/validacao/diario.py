@@ -27,13 +27,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from logging import Logger
 
+from app.core.analysis.regra_v2 import VERSAO_REGRA_V2, EntradaV2, posicao_no_range, recomendar_v2
 from app.validacao.avaliador import HORIZONTES_PREGOES, avaliar
 
 # B3 em horario de Brasilia (UTC-3, sem horario de verao desde 2019); o banco
 # grava data_analise em UTC. Abertura do pregao a vista: 10h.
 FUSO_B3 = timezone(timedelta(hours=-3))
 ABERTURA_B3 = time(10, 0)
-BENCHMARK = "BOVA11"
 
 
 def abertura_em_utc(dia: date) -> datetime:
@@ -73,10 +73,31 @@ def extrair_sinal(detalhes: dict) -> dict | None:
     }
 
 
+def sinal_v2_em_sombra(detalhes: dict, fechamento: float, dados, simbolo: str, dia: date) -> dict:
+    """Regra v2 aplicada ao mesmo pregao, com os dados como eram conhecidos
+    no dia: fechamento oficial, faixa de 52 semanas do insight v1, LPA pela
+    data de entrega na CVM, CDI e IPCA ja publicados."""
+    snapshot = detalhes.get("snapshot_mercado") or {}
+    lpa, fonte = dados.lpa_em(simbolo, dia)
+    saida = recomendar_v2(
+        EntradaV2(
+            preco=fechamento,
+            lpa=lpa,
+            juros_anual_percent=dados.juros_em(dia),
+            ipca_12m_percent=dados.ipca_12m_em(dia),
+            posicao_52w=posicao_no_range(fechamento, snapshot.get("minima_52w"), snapshot.get("maxima_52w")),
+            fonte_lpa=fonte,
+        )
+    )
+    return {"recomendacao": saida.recomendacao, "detalhe": saida.como_dict()}
+
+
 @dataclass
 class ResumoRegistro:
     data_pregao: date | None = None
     registrados: list[str] = field(default_factory=list)
+    sombra_v2: list[str] = field(default_factory=list)
+    sombra_v2_sem_dados: list[str] = field(default_factory=list)
     ja_existiam: list[str] = field(default_factory=list)
     sem_insight: list[str] = field(default_factory=list)
     sem_versao: list[str] = field(default_factory=list)
@@ -89,7 +110,10 @@ class ResumoAvaliacao:
 
 
 class DiarioDeSinais:
-    def __init__(self, repositorio, fabrica_de_sessao, logger: Logger, horizontes=HORIZONTES_PREGOES):
+    def __init__(self, repositorio, fabrica_de_sessao, logger: Logger, horizontes=HORIZONTES_PREGOES,
+                 carregar_dados=None):
+        """carregar_dados(db) -> DadosPontoNoTempo; None desliga a sombra v2."""
+        self._carregar_dados = carregar_dados
         self._repo = repositorio
         self._sessao = fabrica_de_sessao
         self._logger = logger
@@ -116,9 +140,8 @@ class DiarioDeSinais:
             inicio, fim = janela_do_sinal(
                 data_pregao, self._repo.proximo_pregao(db, data_pregao), agora_utc
             )
+            dados = self._carregar_dados(db) if self._carregar_dados else None
             for simbolo in sorted(fechamentos):
-                if simbolo == BENCHMARK:
-                    continue
                 insight = self._repo.ultimo_insight(db, simbolo, inicio, fim)
                 if insight is None:
                     resumo.sem_insight.append(simbolo)
@@ -139,6 +162,31 @@ class DiarioDeSinais:
                     },
                 )
                 (resumo.registrados if novo else resumo.ja_existiam).append(simbolo)
+
+                if dados is None:
+                    continue
+                sombra = sinal_v2_em_sombra(
+                    insight["detalhes"], float(fechamentos[simbolo]), dados, simbolo, data_pregao
+                )
+                if sombra["recomendacao"] == "SEM_DADOS":
+                    resumo.sombra_v2_sem_dados.append(simbolo)
+                    continue
+                self._repo.inserir_sinal(
+                    db,
+                    {
+                        "versao_regra": VERSAO_REGRA_V2,
+                        "nivel_risco": None,
+                        "confianca_score": None,
+                        "sinal_momentum": campos.get("sinal_momentum"),
+                        "sinal_reversao": campos.get("sinal_reversao"),
+                        "simbolo": simbolo,
+                        "data_pregao": data_pregao,
+                        "recomendacao": sombra["recomendacao"],
+                        "preco_fechamento": fechamentos[simbolo],
+                        "insight_id": insight["id"],
+                    },
+                )
+                resumo.sombra_v2.append(f"{simbolo}:{sombra['recomendacao']}")
             db.commit()
         return resumo
 
@@ -151,14 +199,12 @@ class DiarioDeSinais:
 
             desde = min(s["data_pregao"] for s in pendentes)
             cdi = self._repo.cdi_diario(db, desde)
-            benchmark = self._repo.serie_de_precos(db, BENCHMARK, desde)
-            series: dict[str, list] = {}
+            # Uma consulta so: a mesma carteira serve de serie do proprio
+            # sinal e de regua (media simples) para todos os sinais.
+            carteira = self._repo.series_da_carteira(db, desde)
 
             for sinal in pendentes:
-                serie = series.get(sinal["simbolo"])
-                if serie is None:
-                    serie = self._repo.serie_de_precos(db, sinal["simbolo"], desde)
-                    series[sinal["simbolo"]] = serie
+                serie = carteira.get(sinal["simbolo"], [])
                 feitos = self._repo.horizontes_avaliados(db, sinal["id"])
                 ainda_falta = False
                 for horizonte in self._horizontes:
@@ -166,7 +212,7 @@ class DiarioDeSinais:
                         continue
                     resultado = avaliar(
                         sinal["data_pregao"], sinal["recomendacao"], serie, horizonte,
-                        benchmark=benchmark, cdi_diario=cdi,
+                        carteira=carteira, cdi_diario=cdi,
                     )
                     if resultado is None:
                         ainda_falta = True
@@ -188,10 +234,13 @@ def main(argv: list[str] | None = None) -> int:
     # Importes tardios: o modulo continua testavel sem banco configurado.
     from app.config.config_logger import setup_logger
     from app.config.database_config import ConfigDatabase
+    from app.validacao.ponto_no_tempo import DadosPontoNoTempo
     from app.validacao.repositorio_diario import RepositorioDiario
 
     logger = setup_logger()
-    diario = DiarioDeSinais(RepositorioDiario(), ConfigDatabase().session, logger)
+    diario = DiarioDeSinais(
+        RepositorioDiario(), ConfigDatabase().session, logger, carregar_dados=DadosPontoNoTempo.carregar
+    )
     agora_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if argumentos.comando == "registrar":
@@ -200,6 +249,10 @@ def main(argv: list[str] | None = None) -> int:
             "Diario %s | registrados=%d %s | ja existiam=%d | sem insight=%s | sem versao de regra=%s",
             r.data_pregao, len(r.registrados), r.registrados, len(r.ja_existiam),
             r.sem_insight, r.sem_versao,
+        )
+        logger.info(
+            "Sombra v2 (%s) | registrados=%d %s | sem dados (LPA, juros)=%s",
+            VERSAO_REGRA_V2, len(r.sombra_v2), r.sombra_v2, r.sombra_v2_sem_dados,
         )
     else:
         r = diario.avaliar()

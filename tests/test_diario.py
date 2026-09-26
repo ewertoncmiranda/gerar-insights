@@ -57,8 +57,8 @@ class _RepoFake:
         datas = [d for d in self._datas() if d > dia]
         return datas[0] if datas else None
 
-    def serie_de_precos(self, db, simbolo, desde):
-        return [p for p in self.candles.get(simbolo, []) if p.data >= desde]
+    def series_da_carteira(self, db, desde):
+        return {s: [p for p in serie if p.data >= desde] for s, serie in self.candles.items()}
 
     def cdi_diario(self, db, desde):
         return {d: v for d, v in self.cdi.items() if d >= desde}
@@ -221,9 +221,9 @@ def test_sem_data_usa_o_ultimo_pregao_ate_hoje_em_brasilia():
     assert resumo.registrados == ["PETR4"]
 
 
-def test_benchmark_nao_vira_sinal_e_insight_sem_versao_e_contado():
+def test_insight_sem_versao_e_ativo_sem_insight_sao_contados_separadamente():
     repo = _RepoFake()
-    repo.candles["BOVA11"] = [Pregao(SEXTA, Decimal(130), Decimal(130))]
+    repo.candles["PETR4"] = [Pregao(SEXTA, Decimal(48), Decimal(48))]
     repo.candles["VALE3"] = [Pregao(SEXTA, Decimal(60), Decimal(60))]
     repo.insights = [insight(1, "VALE3", datetime(2026, 9, 25, 21, 0), versao=None)]
     d, _ = diario(repo)
@@ -231,6 +231,7 @@ def test_benchmark_nao_vira_sinal_e_insight_sem_versao_e_contado():
     resumo = d.registrar(SEXTA, datetime(2026, 9, 25, 22, 0))
 
     assert resumo.sem_versao == ["VALE3"]
+    assert resumo.sem_insight == ["PETR4"]
     assert repo.sinais == []
 
 
@@ -263,10 +264,10 @@ def test_avaliar_de_novo_nao_regrava_o_horizonte_ja_avaliado():
     assert len(repo.resultados) == 1
 
 
-def test_avaliacao_usa_bova11_e_cdi_quando_existem():
+def test_avaliacao_usa_a_carteira_e_o_cdi_quando_existem():
     repo = _RepoFake()
-    repo.candles["PETR4"] = pregoes(SEXTA, 25, Decimal("10"))
-    repo.candles["BOVA11"] = pregoes(SEXTA, 25, Decimal("130"))
+    for simbolo in ("PETR4", "VALE3", "WEGE3", "ITUB4", "BBAS3"):
+        repo.candles[simbolo] = pregoes(SEXTA, 25, Decimal("10"))
     repo.cdi = {p.data: Decimal("0.05") for p in repo.candles["PETR4"]}
     repo.sinais = [{"id": 1, "simbolo": "PETR4", "data_pregao": SEXTA, "recomendacao": "COMPRA_FORTE"}]
     d, _ = diario(repo, horizontes=(21,))
@@ -274,6 +275,7 @@ def test_avaliacao_usa_bova11_e_cdi_quando_existem():
     d.avaliar()
 
     resultado = repo.resultados[(1, 21)]
-    assert resultado.retorno_bova11 == Decimal("0")
+    assert resultado.ativos_na_carteira == 5
+    assert resultado.excesso_carteira == Decimal("0")  # andou igual a carteira
     assert resultado.retorno_cdi > 0
     assert resultado.excesso_cdi < 0  # preco parado perde para o CDI

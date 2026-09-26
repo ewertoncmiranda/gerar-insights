@@ -1,6 +1,13 @@
 from app.core.analysis.market_snapshot import MarketSnapshot
 from app.core.analysis.versao_regra import VERSAO_REGRA
 
+# Recomendar compra ou venda a terceiros e atividade de analista credenciado
+# (CVM Res. 20/2021): todo insight sai com o aviso, para quem quer que o exiba.
+AVISO_LEGAL = (
+    "Sinal quantitativo gerado por regras automaticas para estudo, nao recomendacao de "
+    "investimento. Nao considera sua situacao, impostos nem custos; decisoes sao suas."
+)
+
 
 class InsightPayloadBuilder:
     def build(
@@ -18,6 +25,7 @@ class InsightPayloadBuilder:
             "versao_payload": "2.1",
             # Qual regra produziu este insight; o diario de sinais agrupa por ela.
             "versao_regra": VERSAO_REGRA,
+            "aviso_legal": AVISO_LEGAL,
             "resumo": {
                 "recomendacao": recommendation["recomendacao"],
                 "nivel_risco": recommendation["nivel_risco"],

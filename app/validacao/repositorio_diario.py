@@ -89,16 +89,25 @@ class RepositorioDiario:
         )
         return {h for (h,) in linhas}
 
-    def serie_de_precos(self, db, simbolo: str, desde: date) -> list[Pregao]:
+    def series_da_carteira(self, db, desde: date) -> dict[str, list[Pregao]]:
+        """Serie de todos os ativos com candle desde `desde`, por simbolo.
+
+        Serve a dois usos: a serie do proprio sinal e a media da carteira
+        (benchmark). Ativo que so aparece depois de `desde` entra so nas
+        janelas em que tem preco nas duas pontas.
+        """
         linhas = db.execute(
             text(
-                "SELECT data, open, close FROM candle_diario "
-                "WHERE simbolo = :s AND data >= :d AND open IS NOT NULL AND close IS NOT NULL "
-                "ORDER BY data"
+                "SELECT simbolo, data, open, close FROM candle_diario "
+                "WHERE data >= :d AND open IS NOT NULL AND close IS NOT NULL "
+                "ORDER BY simbolo, data"
             ),
-            {"s": simbolo, "d": desde},
+            {"d": desde},
         )
-        return [Pregao(d, Decimal(str(a)), Decimal(str(f))) for d, a, f in linhas]
+        series: dict[str, list[Pregao]] = {}
+        for simbolo, d, a, f in linhas:
+            series.setdefault(simbolo, []).append(Pregao(d, Decimal(str(a)), Decimal(str(f))))
+        return series
 
     def cdi_diario(self, db, desde: date) -> dict[date, Decimal]:
         linhas = db.execute(
@@ -114,11 +123,11 @@ class RepositorioDiario:
         db.execute(
             text(
                 "INSERT IGNORE INTO sinal_resultado (sinal_id, horizonte, data_entrada, data_saida, "
-                "preco_entrada, preco_saida, retorno_bruto, retorno_liquido, retorno_bova11, retorno_cdi, "
-                "excesso_bova11, excesso_cdi, acerto, evento_suspeito) VALUES (:sinal_id, :horizonte, "
-                ":data_entrada, :data_saida, :preco_entrada, :preco_saida, :retorno_bruto, "
-                ":retorno_liquido, :retorno_bova11, :retorno_cdi, :excesso_bova11, :excesso_cdi, "
-                ":acerto, :evento_suspeito)"
+                "preco_entrada, preco_saida, retorno_bruto, retorno_liquido, retorno_carteira, retorno_cdi, "
+                "excesso_carteira, ativos_na_carteira, excesso_cdi, acerto, evento_suspeito) VALUES "
+                "(:sinal_id, :horizonte, :data_entrada, :data_saida, :preco_entrada, :preco_saida, "
+                ":retorno_bruto, :retorno_liquido, :retorno_carteira, :retorno_cdi, :excesso_carteira, "
+                ":ativos_na_carteira, :excesso_cdi, :acerto, :evento_suspeito)"
             ),
             {
                 "sinal_id": sinal_id,
@@ -129,9 +138,10 @@ class RepositorioDiario:
                 "preco_saida": r.preco_saida,
                 "retorno_bruto": r.retorno_bruto,
                 "retorno_liquido": r.retorno_liquido,
-                "retorno_bova11": r.retorno_bova11,
+                "retorno_carteira": r.retorno_carteira,
                 "retorno_cdi": r.retorno_cdi,
-                "excesso_bova11": r.excesso_bova11,
+                "excesso_carteira": r.excesso_carteira,
+                "ativos_na_carteira": r.ativos_na_carteira,
                 "excesso_cdi": r.excesso_cdi,
                 "acerto": r.acerto,
                 "evento_suspeito": r.evento_suspeito,

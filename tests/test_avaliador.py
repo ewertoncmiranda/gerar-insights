@@ -83,20 +83,56 @@ def test_ganho_menor_que_o_custo_nao_conta_como_acerto():
     assert resultado.acerto is False
 
 
-def test_excesso_sobre_bova11_no_mesmo_periodo():
+def carteira_com(*variacoes, inicio=INICIO):
+    """Um ativo por variacao: preco 100 no sinal e na entrada, 100*(1+v) na saida."""
+    return {
+        f"A{i}": serie([100, 100, 100 * (1 + v)], inicio=inicio) for i, v in enumerate(variacoes)
+    }
+
+
+def test_excesso_sobre_a_media_simples_da_carteira_no_mesmo_periodo():
     ativo = serie([10, 10, 12])  # +20%
-    bova11 = serie([100, 100, 105])  # +5%
-    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, benchmark=bova11, custo_ida_e_volta=D(0))
-    assert resultado.retorno_bova11 == D("0.05")
-    assert resultado.excesso_bova11 == D("0.15")
+    carteira = carteira_com(0.0, 0.05, 0.10, 0.0, 0.10)  # media +5%
+    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, carteira=carteira, custo_ida_e_volta=D(0))
+    assert resultado.retorno_carteira == D("0.05")
+    assert resultado.excesso_carteira == D("0.15")
+    assert resultado.ativos_na_carteira == 5
 
 
-def test_benchmark_sem_as_datas_deixa_excesso_nulo_em_vez_de_comparar_periodos_diferentes():
+def test_custo_sai_dos_dois_lados_comparando_liquido_com_liquido():
+    """Comprar a carteira inteira tambem paga custo."""
     ativo = serie([10, 10, 12])
-    bova11 = serie([100, 100, 105], inicio=date(2025, 1, 6))
-    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, benchmark=bova11)
-    assert resultado.retorno_bova11 is None
-    assert resultado.excesso_bova11 is None
+    carteira = carteira_com(0.05, 0.05, 0.05, 0.05, 0.05)
+    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, carteira=carteira, custo_ida_e_volta=D("0.001"))
+    assert resultado.retorno_carteira == D("0.049000")
+    assert resultado.excesso_carteira == D("0.150000")  # 0,199 - 0,049
+
+
+def test_carteira_fina_demais_nao_vira_regua():
+    ativo = serie([10, 10, 12])
+    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, carteira=carteira_com(0.05, 0.05))
+    assert resultado.retorno_carteira is None
+    assert resultado.excesso_carteira is None
+    assert resultado.ativos_na_carteira == 2
+
+
+def test_ativo_sem_preco_nas_duas_datas_fica_fora_da_media():
+    """Comparar periodos diferentes nao e comparacao."""
+    ativo = serie([10, 10, 12])
+    carteira = carteira_com(0.10, 0.10, 0.10, 0.10, 0.10)
+    carteira["DESENCONTRADO"] = serie([100, 100, 500], inicio=date(2025, 1, 6))
+    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, carteira=carteira, custo_ida_e_volta=D(0))
+    assert resultado.ativos_na_carteira == 5
+    assert resultado.retorno_carteira == D("0.1")
+
+
+def test_desdobramento_de_outro_ativo_nao_contamina_a_media():
+    ativo = serie([10, 10, 12])
+    carteira = carteira_com(0.10, 0.10, 0.10, 0.10, 0.10)
+    carteira["DESDOBROU"] = serie([100, 100, 50])  # 2:1 em preco bruto
+    resultado = avaliar(ativo[0].data, "COMPRA_FORTE", ativo, 2, carteira=carteira, custo_ida_e_volta=D(0))
+    assert resultado.ativos_na_carteira == 5
+    assert resultado.retorno_carteira == D("0.1")
 
 
 def test_cdi_acumulado_da_entrada_ate_a_vespera_da_saida():
