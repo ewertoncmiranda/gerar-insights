@@ -28,7 +28,8 @@ class SerieTecnicaService:
         if len(candles) < JANELA_MINIMA:
             return None
 
-        closes = [float(c.fechamento) for c in candles if c.fechamento is not None]
+        closes = [_fechamento_para_analise(c) for c in candles]
+        closes = [c for c in closes if c is not None]
         volumes = [float(c.volume) for c in candles if c.volume is not None]
 
         metricas = self.analyzer.analyze(closes, volumes)
@@ -63,3 +64,25 @@ class SerieTecnicaService:
         if vender:
             return "VENDA_TECNICA"
         return "NEUTRO_TECNICO"
+
+
+def _fechamento_para_analise(candle) -> float | None:
+    """Preco ajustado por proventos, com o fechamento bruto como reserva.
+
+    Dividendo e desdobramento derrubam o preco sem que ninguem tenha vendido:
+    e ajuste mecanico, nao movimento de mercado. Usar o fechamento bruto mete
+    um degrau artificial na serie, e media movel e z-score passam a medir o
+    provento em vez do comportamento do papel.
+
+    A BRAPI ja entrega `adjustedClose`, gravado em `fechamento_ajustado`; ate
+    2026-09-26 o calculo ignorava essa coluna. Medido na base: 47% dos candles
+    tinham valor diferente, chegando a 2,70% de divergencia no PETR4.
+
+    O fallback existe porque `adjustedClose` pode vir nulo em candle antigo ou
+    em ativo recem-listado - nesse caso o bruto e melhor que descartar o ponto.
+    """
+    if candle.fechamento_ajustado is not None:
+        return float(candle.fechamento_ajustado)
+    if candle.fechamento is not None:
+        return float(candle.fechamento)
+    return None
