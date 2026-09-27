@@ -26,7 +26,9 @@ class Limiares:
     margem_compra_moderada: float = 20.0
     ey_compra_moderada: float = 8.0
     # Faixa neutra (ISS-F3): entre margem_venda e 0 e MANTER; so abaixo e venda.
-    margem_venda: float = -15.0
+    # -100 calibrado em 2026-09-27 (DEC-07): com o fator 4,4/Selic as margens
+    # ficam muito negativas, e -15 punha 92% do teste em venda.
+    margem_venda: float = -100.0
     # Alerta de risco: perto da maxima de 52 semanas com pouca margem.
     posicao_alerta: float = 90.0
     margem_alerta: float = 10.0

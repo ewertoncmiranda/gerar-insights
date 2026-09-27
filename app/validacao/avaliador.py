@@ -22,10 +22,17 @@ Convencoes (decisoes D1 e D2 do plano, 2026-09-26):
   - CDI acumulado nos dias em que o dinheiro esteve aplicado:
     de data_entrada (inclusive) ate data_saida (exclusive).
 
-O que NAO faz, de proposito: nao ajusta proventos. Com preco bruto (COTAHIST),
-um desdobramento aparece como queda de 50% sem ninguem ter vendido; a janela
-que contem esse salto e marcada como suspeita e fica fora das estatisticas,
-em vez de virar um "erro" da regra.
+Retorno com proventos (27/09/2026, Item 3): quando o chamador passa o mapa
+de proventos do ativo (data-com -> valor por acao, de provento_distribuido),
+o retorno soma o que foi distribuido no periodo ao preco de saida - sem
+isso, pagadora de dividendo parece sistematicamente pior do que e. So cobre
+dados a partir de 27/09/2026 (limite da fonte, ver app/validacao/proventos.py);
+sinais mais antigos ficam sem ajuste por ausencia de dado, nao por erro.
+
+O que NAO faz, de proposito: nao ajusta desdobramento/grupamento. Com preco
+bruto (COTAHIST), um desdobramento aparece como queda de 50% sem ninguem ter
+vendido; a janela que contem esse salto e marcada como suspeita e fica fora
+das estatisticas, em vez de virar um "erro" da regra.
 """
 
 from __future__ import annotations
@@ -33,6 +40,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+
+from app.validacao.proventos import codigo_emissor
 
 HORIZONTES_PREGOES: tuple[int, ...] = (21, 63, 126)
 CUSTO_IDA_E_VOLTA_PADRAO = Decimal("0.0010")
@@ -87,6 +96,7 @@ class ResultadoHorizonte:
     excesso_cdi: Decimal | None
     acerto: bool | None
     evento_suspeito: bool
+    proventos_periodo: Decimal = Decimal("0")
 
 
 # Abaixo disso a "media da carteira" e fina demais para representar o
@@ -102,6 +112,8 @@ def avaliar(
     carteira: dict[str, list[Pregao]] | None = None,
     cdi_diario: dict[date, Decimal] | None = None,
     custo_ida_e_volta: Decimal = CUSTO_IDA_E_VOLTA_PADRAO,
+    proventos: dict[date, Decimal] | None = None,
+    proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
 ) -> ResultadoHorizonte | None:
     """Avalia um sinal num horizonte. None = ainda nao ha pregoes suficientes
     (sinal pendente) ou o dia do sinal nao esta na serie."""
@@ -120,10 +132,13 @@ def avaliar(
     if not entrada.abertura or not saida.fechamento:
         return None
 
-    retorno_bruto = saida.fechamento / entrada.abertura - 1
+    soma_proventos = _proventos_no_periodo(proventos, entrada.data, saida.data)
+    retorno_bruto = (saida.fechamento + soma_proventos) / entrada.abertura - 1
     retorno_liquido = retorno_bruto - custo_ida_e_volta
 
-    media_carteira, ativos_na_carteira = _media_da_carteira(carteira, entrada.data, saida.data)
+    media_carteira, ativos_na_carteira = _media_da_carteira(
+        carteira, entrada.data, saida.data, proventos_carteira
+    )
     # Comprar a carteira inteira tambem paga custo: compara liquido com liquido.
     retorno_carteira = media_carteira - custo_ida_e_volta if media_carteira is not None else None
     retorno_cdi = _cdi_acumulado(cdi_diario, entrada.data, saida.data)
@@ -146,23 +161,31 @@ def avaliar(
         excesso_cdi=_q(retorno_liquido - retorno_cdi) if retorno_cdi is not None else None,
         acerto=acerto,
         evento_suspeito=_tem_salto_suspeito(serie[indice_sinal : indice_saida + 1]),
+        proventos_periodo=_q(soma_proventos),
     )
 
 
 def _media_da_carteira(
-    carteira: dict[str, list[Pregao]] | None, data_entrada: date, data_saida: date
+    carteira: dict[str, list[Pregao]] | None,
+    data_entrada: date,
+    data_saida: date,
+    proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
 ) -> tuple[Decimal | None, int | None]:
-    """Media simples do retorno bruto dos ativos da carteira no periodo.
+    """Media simples do retorno bruto (com proventos) dos ativos da carteira
+    no periodo.
 
-    Mesma convencao do sinal (abertura da entrada ao fechamento da saida).
-    Entra so quem tem preco nas DUAS datas - comparar periodos diferentes nao
-    e comparacao - e sem salto suspeito na janela: um desdobramento de outro
+    Mesma convencao do sinal (abertura da entrada ao fechamento da saida,
+    proventos com data-com na mesma janela) - sem isso a regua ficava sem
+    proventos enquanto o sinal ganhava, viesando o excesso a favor de quem
+    paga dividendo mesmo antes do limite de cobertura da fonte. Entra so
+    quem tem preco nas DUAS datas - comparar periodos diferentes nao e
+    comparacao - e sem salto suspeito na janela: um desdobramento de outro
     papel nao pode contaminar a regua. Devolve (media, quantos entraram).
     """
     if not carteira:
         return None, None
     retornos = []
-    for serie in carteira.values():
+    for simbolo, serie in carteira.items():
         janela = sorted(
             (p for p in serie if data_entrada <= p.data <= data_saida), key=lambda p: p.data
         )
@@ -170,7 +193,9 @@ def _media_da_carteira(
             continue
         if not janela[0].abertura or _tem_salto_suspeito(janela):
             continue
-        retornos.append(janela[-1].fechamento / janela[0].abertura - 1)
+        eventos = (proventos_carteira or {}).get(codigo_emissor(simbolo), {})
+        soma = _proventos_no_periodo(eventos, data_entrada, data_saida)
+        retornos.append((janela[-1].fechamento + soma) / janela[0].abertura - 1)
     if len(retornos) < MINIMO_ATIVOS_CARTEIRA:
         return None, len(retornos)
     return sum(retornos) / len(retornos), len(retornos)
@@ -193,6 +218,16 @@ def _cdi_acumulado(
     for dia in dias:
         fator *= 1 + cdi_diario[dia] / 100
     return fator - 1
+
+
+def _proventos_no_periodo(
+    proventos: dict[date, Decimal] | None, data_entrada: date, data_saida: date
+) -> Decimal:
+    """Soma dos proventos com data-com em [entrada, saida) - mesma convencao
+    de janela meio-aberta do CDI acumulado."""
+    if not proventos:
+        return Decimal("0")
+    return sum((v for d, v in proventos.items() if data_entrada <= d < data_saida), Decimal("0"))
 
 
 def _tem_salto_suspeito(janela: list[Pregao]) -> bool:

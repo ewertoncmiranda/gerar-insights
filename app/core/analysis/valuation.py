@@ -63,7 +63,10 @@ def normalizar_lpa(
     minimo porque, com o lucro caindo, a media ainda carrega os anos bons.
     Sem 3 exercicios, fica o LPA atual - e a fonte diz isso.
     Devolve (lpa_usado, fonte, media)."""
-    anuais = [x for x in (lpas_anuais or [])[: limiares.anos_lpa_max] if x is not None]
+    # LPA exatamente zero e conta nao resolvida no ETL (lucro do controlador
+    # gravado como 0 em vez de ausente - TIMS3, LREN3, HAPV3, JBSS32), nao
+    # empresa que lucrou zero: conta como dado ausente.
+    anuais = [x for x in (lpas_anuais or []) if x is not None and x != 0][: limiares.anos_lpa_max]
     if len(anuais) < limiares.anos_lpa_min:
         return lpa_atual, "LPA_ATUAL (historico da CVM insuficiente)", None
     media = sum(anuais) / len(anuais)

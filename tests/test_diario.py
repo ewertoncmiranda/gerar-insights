@@ -63,6 +63,9 @@ class _RepoFake:
     def cdi_diario(self, db, desde):
         return {d: v for d, v in self.cdi.items() if d >= desde}
 
+    def proventos_por_emissor(self, db):
+        return {}
+
     # --- insights
     def ultimo_insight(self, db, simbolo, ini, fim):
         candidatos = [

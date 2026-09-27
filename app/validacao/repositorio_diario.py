@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import text
 
 from app.validacao.avaliador import Pregao, ResultadoHorizonte
+from app.validacao.proventos import agrupar_por_emissor_e_data
 
 
 class RepositorioDiario:
@@ -108,6 +109,14 @@ class RepositorioDiario:
         for simbolo, d, a, f in linhas:
             series.setdefault(simbolo, []).append(Pregao(d, Decimal(str(a)), Decimal(str(f))))
         return series
+
+    def proventos_por_emissor(self, db) -> dict[str, dict[date, Decimal]]:
+        """Todo o cache de provento_distribuido (tabela do gestor-ativos-brutos,
+        pequena), agrupado por emissor e data-com - ver app/validacao/proventos.py."""
+        linhas = db.execute(
+            text("SELECT simbolo, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido")
+        ).all()
+        return agrupar_por_emissor_e_data(linhas)
 
     def cdi_diario(self, db, desde: date) -> dict[date, Decimal]:
         linhas = db.execute(

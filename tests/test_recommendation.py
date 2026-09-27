@@ -17,10 +17,12 @@ def valuation(conservador, base, earnings_yield=10.0, preco_ate_graham_number=No
 
 
 def test_venda_valuation_so_abaixo_da_faixa_neutra():
-    """ISS-F3: margem_venda = -15. Abaixo disso, e so entao, e VENDA_VALUATION."""
+    """ISS-F3: abaixo de margem_venda, e so entao, e VENDA_VALUATION. Relativo
+    ao limiar vigente: -15 na primeira versao, -100 depois da calibracao (DEC-07)."""
+    limite = LIMIARES_ATUAIS.margem_venda
     policy = RecommendationPolicy()
     recomendacao = policy.define_recommendation(
-        valuation(conservador=-20, base=-16), range_52w_position=50
+        valuation(conservador=limite - 5, base=limite - 1), range_52w_position=50
     )
     assert recomendacao == "VENDA_VALUATION"
 
