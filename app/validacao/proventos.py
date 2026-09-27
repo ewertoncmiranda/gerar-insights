@@ -6,11 +6,12 @@ Fonte: provento_distribuido, escrita pelo gestor-ativos-brutos
 publico da B3 - tabela de outro dono, lida aqui por SQL explicito, mesmo
 padrao ja usado para candle_diario e indice_macro.
 
-Limite conhecido: a B3 so devolve os proventos aprovados nos ultimos ~12
-meses por consulta. Rodando 1x/dia a partir de 27/09/2026, a tabela acumula
-historico real dali pra frente - datas de sinal anteriores a isso ficam sem
-nenhum provento (nao por erro, por ausencia de dado). O backfill de anos
-anteriores continua em aberto.
+Limite conhecido: a B3 so devolve os proventos aprovados nos ~12 meses
+anteriores a cada coleta (confirmado: primeira coleta em 27/09/2026 trouxe
+eventos desde 26/09/2025) - nao e "so dali pra frente", e uma janela movel
+que anda com a data da coleta. Sinal fora dessa janela fica sem provento
+(nao por erro, por ausencia de dado). O backfill de anos mais antigos
+continua em aberto.
 
 Convencao: usa a data-com (ultima_data_com_direito), nao a data de
 pagamento - e quando o direito e travado e o preco cai no ex, coerente com
