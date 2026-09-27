@@ -216,7 +216,7 @@ def test_regua_da_carteira_tambem_recebe_proventos():
     """Sem isso o sinal ganha provento e a regua nao - excesso fica viesado
     a favor de quem paga dividendo (achado da sessao paralela, 27/09)."""
     pregoes = serie(fechamentos=[10, 10, 10, 10], aberturas=[10, 10, 10, 10])
-    entrada, saida = pregoes[1].data, pregoes[3].data
+    entrada = pregoes[1].data
 
     tickers = ["ATVA3", "ATVB3", "ATVC3", "ATVD3", "ATVE3"]  # raizes distintas -> emissores distintos
     carteira = {t: serie(fechamentos=[10, 10, 10, 10]) for t in tickers}
