@@ -210,3 +210,22 @@ def test_sem_proventos_retorno_e_so_de_preco():
     pregoes = serie(fechamentos=[10, 11, 12, 13], aberturas=[10, 10.5, 11.5, 12.5])
     resultado = avaliar(pregoes[0].data, "COMPRA_FORTE", pregoes, horizonte=3, custo_ida_e_volta=D(0))
     assert resultado.proventos_periodo == D("0")
+
+
+def test_regua_da_carteira_tambem_recebe_proventos():
+    """Sem isso o sinal ganha provento e a regua nao - excesso fica viesado
+    a favor de quem paga dividendo (achado da sessao paralela, 27/09)."""
+    pregoes = serie(fechamentos=[10, 10, 10, 10], aberturas=[10, 10, 10, 10])
+    entrada, saida = pregoes[1].data, pregoes[3].data
+
+    tickers = ["ATVA3", "ATVB3", "ATVC3", "ATVD3", "ATVE3"]  # raizes distintas -> emissores distintos
+    carteira = {t: serie(fechamentos=[10, 10, 10, 10]) for t in tickers}
+    proventos_carteira = {"ATVA": {entrada: D("1.0")}}  # so um membro (ATVA3) paga provento
+
+    resultado = avaliar(
+        pregoes[0].data, None, pregoes, horizonte=3, custo_ida_e_volta=D(0),
+        carteira=carteira, proventos_carteira=proventos_carteira,
+    )
+
+    # (10+0)*4 + (10+1) = 51; media = 51/(5*10) - 1 = 0.02
+    assert resultado.retorno_carteira == D("0.02")

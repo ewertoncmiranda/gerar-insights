@@ -216,6 +216,7 @@ class DiarioDeSinais:
                         sinal["data_pregao"], sinal["recomendacao"], serie, horizonte,
                         carteira=carteira, cdi_diario=cdi,
                         proventos=proventos_por_emissor.get(codigo_emissor(sinal["simbolo"]), {}),
+                        proventos_carteira=proventos_por_emissor,
                     )
                     if resultado is None:
                         ainda_falta = True

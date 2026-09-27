@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.validacao.proventos import codigo_emissor
+
 HORIZONTES_PREGOES: tuple[int, ...] = (21, 63, 126)
 CUSTO_IDA_E_VOLTA_PADRAO = Decimal("0.0010")
 
@@ -111,6 +113,7 @@ def avaliar(
     cdi_diario: dict[date, Decimal] | None = None,
     custo_ida_e_volta: Decimal = CUSTO_IDA_E_VOLTA_PADRAO,
     proventos: dict[date, Decimal] | None = None,
+    proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
 ) -> ResultadoHorizonte | None:
     """Avalia um sinal num horizonte. None = ainda nao ha pregoes suficientes
     (sinal pendente) ou o dia do sinal nao esta na serie."""
@@ -133,7 +136,9 @@ def avaliar(
     retorno_bruto = (saida.fechamento + soma_proventos) / entrada.abertura - 1
     retorno_liquido = retorno_bruto - custo_ida_e_volta
 
-    media_carteira, ativos_na_carteira = _media_da_carteira(carteira, entrada.data, saida.data)
+    media_carteira, ativos_na_carteira = _media_da_carteira(
+        carteira, entrada.data, saida.data, proventos_carteira
+    )
     # Comprar a carteira inteira tambem paga custo: compara liquido com liquido.
     retorno_carteira = media_carteira - custo_ida_e_volta if media_carteira is not None else None
     retorno_cdi = _cdi_acumulado(cdi_diario, entrada.data, saida.data)
@@ -161,19 +166,26 @@ def avaliar(
 
 
 def _media_da_carteira(
-    carteira: dict[str, list[Pregao]] | None, data_entrada: date, data_saida: date
+    carteira: dict[str, list[Pregao]] | None,
+    data_entrada: date,
+    data_saida: date,
+    proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
 ) -> tuple[Decimal | None, int | None]:
-    """Media simples do retorno bruto dos ativos da carteira no periodo.
+    """Media simples do retorno bruto (com proventos) dos ativos da carteira
+    no periodo.
 
-    Mesma convencao do sinal (abertura da entrada ao fechamento da saida).
-    Entra so quem tem preco nas DUAS datas - comparar periodos diferentes nao
-    e comparacao - e sem salto suspeito na janela: um desdobramento de outro
+    Mesma convencao do sinal (abertura da entrada ao fechamento da saida,
+    proventos com data-com na mesma janela) - sem isso a regua ficava sem
+    proventos enquanto o sinal ganhava, viesando o excesso a favor de quem
+    paga dividendo mesmo antes do limite de cobertura da fonte. Entra so
+    quem tem preco nas DUAS datas - comparar periodos diferentes nao e
+    comparacao - e sem salto suspeito na janela: um desdobramento de outro
     papel nao pode contaminar a regua. Devolve (media, quantos entraram).
     """
     if not carteira:
         return None, None
     retornos = []
-    for serie in carteira.values():
+    for simbolo, serie in carteira.items():
         janela = sorted(
             (p for p in serie if data_entrada <= p.data <= data_saida), key=lambda p: p.data
         )
@@ -181,7 +193,9 @@ def _media_da_carteira(
             continue
         if not janela[0].abertura or _tem_salto_suspeito(janela):
             continue
-        retornos.append(janela[-1].fechamento / janela[0].abertura - 1)
+        eventos = (proventos_carteira or {}).get(codigo_emissor(simbolo), {})
+        soma = _proventos_no_periodo(eventos, data_entrada, data_saida)
+        retornos.append((janela[-1].fechamento + soma) / janela[0].abertura - 1)
     if len(retornos) < MINIMO_ATIVOS_CARTEIRA:
         return None, len(retornos)
     return sum(retornos) / len(retornos), len(retornos)

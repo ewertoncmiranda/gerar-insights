@@ -266,6 +266,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
                     dia, None, serie[i : i + horizonte + 1], horizonte,
                     carteira=carteira_entre(entrada, saida), cdi_diario=cdi_entre(entrada, saida),
                     proventos=proventos_por_emissor.get(codigo_emissor(simbolo), {}),
+                    proventos_carteira=proventos_por_emissor,
                 )
                 if resultado is not None:
                     amostra.resultados[horizonte] = resultado
