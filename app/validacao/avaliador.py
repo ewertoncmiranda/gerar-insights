@@ -26,8 +26,8 @@ Retorno com proventos (27/09/2026, Item 3): quando o chamador passa o mapa
 de proventos do ativo (data-com -> valor por acao, de provento_distribuido),
 o retorno soma o que foi distribuido no periodo ao preco de saida - sem
 isso, pagadora de dividendo parece sistematicamente pior do que e. So cobre
-dados a partir de 27/09/2026 (limite da fonte, ver app/validacao/proventos.py);
-sinais mais antigos ficam sem ajuste por ausencia de dado, nao por erro.
+os ~12 meses anteriores a cada coleta da B3 (ver app/validacao/proventos.py);
+sinais fora dessa janela ficam sem ajuste por ausencia de dado, nao por erro.
 
 O que NAO faz, de proposito: nao ajusta desdobramento/grupamento. Com preco
 bruto (COTAHIST), um desdobramento aparece como queda de 50% sem ninguem ter
