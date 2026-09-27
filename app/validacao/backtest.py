@@ -22,9 +22,10 @@ Limites conhecidos, gravados em observacoes: proventos cobrem uma janela
 movel de ~12 meses anteriores a CADA coleta da B3 (ver app/validacao/
 proventos.py - confirmado: a primeira coleta em 27/09/2026 trouxe eventos
 desde 26/09/2025), nao um corte fixo dali pra frente; sinais fora dessa
-janela ficam sem ajuste por ausencia de dado. Alem disso, universo de hoje
-olhando para tras (vies de sobrevivencia) e TTM so existe para os ultimos
-anos carregados.
+janela ficam sem ajuste por ausencia de dado. O universo e o do ano de cada
+sinal, com quem saiu da bolsa (universo.py); o que resta de sobrevivencia:
+papel deslistado no meio da janela nao tem saida e a janela e descartada.
+TTM so existe para os ultimos anos carregados.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from logging import Logger
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.core.analysis.limiares import LIMIARES_ATUAIS, Limiares
 from app.core.analysis.market_snapshot import MarketSnapshot
@@ -58,8 +59,11 @@ from app.validacao.avaliador import (
     ResultadoHorizonte,
     avaliar,
     direcao,
+    media_da_carteira,
 )
+from app.validacao.bootstrap import intervalo_em_blocos
 from app.validacao.ponto_no_tempo import DadosPontoNoTempo
+from app.validacao.universo import LIQUIDEZ_MINIMA, PREGOES_MINIMOS, universo_por_ano
 
 CORTE_PADRAO = date(2022, 12, 31)
 INICIO_PADRAO = date(2017, 1, 1)
@@ -206,14 +210,28 @@ REGRAS: dict[str, Callable[[Amostra], str]] = {
 
 def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES) -> tuple[list[Amostra], list[str], int]:
     """(amostras, observacoes, quantos ativos com serie). Parte cara do
-    backtest, feita uma vez so."""
-    universo = {s for (s,) in db.execute(text("SELECT simbolo FROM ativo_monitorado WHERE ativo = TRUE"))}
+    backtest, feita uma vez so.
+
+    Universo amplo e point-in-time (TASK-51, universo.py): a acao so gera
+    amostra nos anos em que estava no universo, e a regua da carteira e a
+    media dos membros do universo do ano da entrada."""
     identidades = {
         s: (c, bool(k))
         for s, c, k in db.execute(text("SELECT simbolo, simbolo_canonico, continuidade_preco FROM ativo_identidade"))
     }
+    universo_ano = universo_por_ano(db, identidades)
+    if not universo_ano:
+        raise RuntimeError("Universo vazio: carregue o COTAHIST amplo (etl --cotahist) antes do backtest")
+    universo = set().union(*universo_ano.values())
+    # So os codigos do universo (e os antigos do mesmo papel): a tabela tem
+    # ~1,2 milhao de linhas de ~1.800 codigos.
+    codigos = universo | {s for s, (c, continuo) in identidades.items() if c in universo and continuo}
     linhas = db.execute(
-        text("SELECT simbolo, data_pregao, abertura, maxima, minima, fechamento FROM cotacao_b3_diaria ORDER BY data_pregao")
+        text(
+            "SELECT simbolo, data_pregao, abertura, maxima, minima, fechamento FROM cotacao_b3_diaria "
+            "WHERE simbolo IN :codigos ORDER BY data_pregao"
+        ).bindparams(bindparam("codigos", expanding=True)),
+        {"codigos": sorted(codigos)},
     ).all()
     series = montar_series(linhas, identidades, universo)
     dados = DadosPontoNoTempo.carregar(db)
@@ -228,10 +246,11 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
         db.execute(text("SELECT simbolo, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido")).all()
     )
 
-    observacoes = []
-    sem_serie = sorted(universo - set(series))
-    if sem_serie:
-        observacoes.append(f"Sem COTAHIST (fora do backtest): {', '.join(sem_serie)}")
+    observacoes = [
+        f"Universo por ano (>= {PREGOES_MINIMOS} pregões e volume médio >= R$ {LIQUIDEZ_MINIMA / 1e6:.0f} mi/dia "
+        "no ano anterior, sem units nem BDRs, incluindo quem saiu da bolsa): "
+        + ", ".join(f"{ano}: {len(membros)}" for ano, membros in sorted(universo_ano.items()))
+    ]
     if len(series) < 5:
         raise RuntimeError(f"So {len(series)} ativos com COTAHIST; carregue o --cotahist antes do backtest")
     if dados.selic_em(inicio) is None:
@@ -239,18 +258,22 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
 
     pregoes = {s: [Pregao(v.data, v.abertura, v.fechamento) for v in velas] for s, velas in series.items()}
     indice_por_data = {s: {p.data: i for i, p in enumerate(ps)} for s, ps in pregoes.items()}
-    cache_carteira: dict[tuple[date, date], dict[str, list[Pregao]]] = {}
+    cache_media: dict[tuple[date, date], tuple[Decimal | None, int | None]] = {}
 
-    def carteira_entre(entrada: date, saida: date) -> dict[str, list[Pregao]]:
+    def media_entre(entrada: date, saida: date) -> tuple[Decimal | None, int | None]:
+        """Regua da carteira: membros do universo do ano da entrada, uma vez por janela."""
         chave = (entrada, saida)
-        if chave not in cache_carteira:
+        if chave not in cache_media:
             recorte = {}
-            for s, ps in pregoes.items():
+            for s in universo_ano.get(entrada.year, set()):
+                ps = pregoes.get(s)
+                if ps is None:
+                    continue
                 i, j = indice_por_data[s].get(entrada), indice_por_data[s].get(saida)
                 if i is not None and j is not None:
                     recorte[s] = ps[i : j + 1]
-            cache_carteira[chave] = recorte
-        return cache_carteira[chave]
+            cache_media[chave] = media_da_carteira(recorte, entrada, saida, proventos_por_emissor)
+        return cache_media[chave]
 
     def cdi_entre(entrada: date, saida: date) -> dict[date, Decimal]:
         i, j = bisect.bisect_left(datas_cdi, entrada), bisect.bisect_left(datas_cdi, saida)
@@ -261,7 +284,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
         serie = pregoes[simbolo]
         for i in primeiros_pregoes_do_mes(velas):
             dia = velas[i].data
-            if dia < inicio or i < PREGOES_52_SEMANAS:
+            if dia < inicio or i < PREGOES_52_SEMANAS or simbolo not in universo_ano.get(dia.year, set()):
                 continue
             janela = velas[i - PREGOES_52_SEMANAS + 1 : i + 1]
             lpa_anual, _ = dados.lpa_em(simbolo, dia, usar_ttm=False)
@@ -281,9 +304,9 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
                 entrada, saida = serie[i + 1].data, serie[i + horizonte].data
                 resultado = avaliar(
                     dia, None, serie[i : i + horizonte + 1], horizonte,
-                    carteira=carteira_entre(entrada, saida), cdi_diario=cdi_entre(entrada, saida),
+                    cdi_diario=cdi_entre(entrada, saida),
                     proventos=proventos_por_emissor.get(codigo_emissor(simbolo), {}),
-                    proventos_carteira=proventos_por_emissor,
+                    media_carteira_pronta=media_entre(entrada, saida),
                 )
                 if resultado is not None:
                     amostra.resultados[horizonte] = resultado
@@ -366,7 +389,10 @@ class Backtest:
             "Retorno inclui proventos (data-com) numa janela móvel de ~12 meses "
             "anteriores a cada coleta da B3; sinais fora dessa janela não têm ajuste."
         )
-        observacoes.append("Universo de hoje aplicado ao passado (viés de sobrevivência).")
+        observacoes.append(
+            "Janela de papel que saiu da bolsa antes do fim não tem preço de saída e é descartada "
+            "(resto de viés de sobrevivência)."
+        )
 
         placar = agregar(avaliacoes)
         self._validar(placar, avaliacoes)
@@ -376,10 +402,13 @@ class Backtest:
                     "INSERT INTO backtest_placar (execucao_id, versao_regra, periodo, recomendacao, horizonte, "
                     "avaliados, acertos, taxa_base, retorno_medio, excesso_medio_cdi, excesso_medio_carteira, "
                     "n_excesso_cdi, desvio_excesso_cdi, n_excesso_carteira, desvio_excesso_carteira, "
-                    "janelas_com_provento) "
+                    "janelas_com_provento, ic_acerto_inferior, ic_acerto_superior, "
+                    "ic_excesso_carteira_inferior, ic_excesso_carteira_superior, meses_bootstrap) "
                     "VALUES (:e, :versao, :periodo, :recomendacao, :horizonte, :avaliados, :acertos, :taxa_base, "
                     ":retorno_medio, :excesso_cdi, :excesso_carteira, :n_excesso_cdi, :desvio_excesso_cdi, "
-                    ":n_excesso_carteira, :desvio_excesso_carteira, :janelas_com_provento)"
+                    ":n_excesso_carteira, :desvio_excesso_carteira, :janelas_com_provento, "
+                    ":ic_acerto_inferior, :ic_acerto_superior, :ic_excesso_carteira_inferior, "
+                    ":ic_excesso_carteira_superior, :meses_bootstrap)"
                 ),
                 {"e": execucao_id, **linha},
             )
@@ -468,8 +497,29 @@ def agregar(avaliacoes: list[Avaliacao]) -> list[dict]:
             "desvio_excesso_carteira": _desvio([r.excesso_carteira for r in resultados]),
             # Quantas janelas tiveram o retorno ajustado por provento (TASK-56).
             "janelas_com_provento": sum(1 for a in avaliadas if a.teve_provento),
+            **_colunas_bootstrap(resultados, horizonte, sentido),
         })
     return linhas
+
+
+def _colunas_bootstrap(resultados: list[ResultadoHorizonte], horizonte: int, sentido: int) -> dict:
+    """IC por bootstrap em blocos de meses (infra#TASK-31, bootstrap.py)."""
+    ic = intervalo_em_blocos(
+        [
+            (r.data_entrada, None if sentido == 0 else bool(r.acerto),
+             None if r.excesso_carteira is None else float(r.excesso_carteira))
+            for r in resultados
+        ],
+        horizonte,
+    )
+    acerto, excesso = ic["acerto"], ic["excesso"]
+    return {
+        "ic_acerto_inferior": None if acerto is None else round(acerto[0], 6),
+        "ic_acerto_superior": None if acerto is None else round(acerto[1], 6),
+        "ic_excesso_carteira_inferior": None if excesso is None else round(excesso[0], 6),
+        "ic_excesso_carteira_superior": None if excesso is None else round(excesso[1], 6),
+        "meses_bootstrap": ic["meses"],
+    }
 
 
 def _contagem(valores) -> int:

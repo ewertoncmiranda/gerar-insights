@@ -114,9 +114,15 @@ def avaliar(
     custo_ida_e_volta: Decimal = CUSTO_IDA_E_VOLTA_PADRAO,
     proventos: dict[date, Decimal] | None = None,
     proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
+    media_carteira_pronta: tuple[Decimal | None, int | None] | None = None,
 ) -> ResultadoHorizonte | None:
     """Avalia um sinal num horizonte. None = ainda nao ha pregoes suficientes
-    (sinal pendente) ou o dia do sinal nao esta na serie."""
+    (sinal pendente) ou o dia do sinal nao esta na serie.
+
+    media_carteira_pronta: (media, ativos) ja calculada por media_da_carteira
+    para esta mesma janela. O backtest do universo amplo (~400 ativos) a
+    calcula uma vez por janela em vez de uma vez por sinal; sem ela, calcula
+    aqui a partir de `carteira`, como sempre."""
     serie = sorted(pregoes, key=lambda p: p.data)
     indice_sinal = next((i for i, p in enumerate(serie) if p.data == data_sinal), None)
     if indice_sinal is None:
@@ -136,8 +142,10 @@ def avaliar(
     retorno_bruto = (saida.fechamento + soma_proventos) / entrada.abertura - 1
     retorno_liquido = retorno_bruto - custo_ida_e_volta
 
-    media_carteira, ativos_na_carteira = _media_da_carteira(
-        carteira, entrada.data, saida.data, proventos_carteira
+    media_carteira, ativos_na_carteira = (
+        media_carteira_pronta
+        if media_carteira_pronta is not None
+        else _media_da_carteira(carteira, entrada.data, saida.data, proventos_carteira)
     )
     # Comprar a carteira inteira tambem paga custo: compara liquido com liquido.
     retorno_carteira = media_carteira - custo_ida_e_volta if media_carteira is not None else None
@@ -241,3 +249,7 @@ def _tem_salto_suspeito(janela: list[Pregao]) -> bool:
 
 def _q(valor: Decimal | None) -> Decimal | None:
     return None if valor is None else valor.quantize(Decimal("0.000001"))
+
+
+# Publico para quem calcula a regua uma vez por janela (backtest do universo amplo).
+media_da_carteira = _media_da_carteira
