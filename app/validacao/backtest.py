@@ -354,9 +354,11 @@ class Backtest:
             db.execute(
                 text(
                     "INSERT INTO backtest_placar (execucao_id, versao_regra, periodo, recomendacao, horizonte, "
-                    "avaliados, acertos, taxa_base, retorno_medio, excesso_medio_cdi, excesso_medio_carteira) "
+                    "avaliados, acertos, taxa_base, retorno_medio, excesso_medio_cdi, excesso_medio_carteira, "
+                    "n_excesso_cdi, desvio_excesso_cdi, n_excesso_carteira, desvio_excesso_carteira) "
                     "VALUES (:e, :versao, :periodo, :recomendacao, :horizonte, :avaliados, :acertos, :taxa_base, "
-                    ":retorno_medio, :excesso_cdi, :excesso_carteira)"
+                    ":retorno_medio, :excesso_cdi, :excesso_carteira, :n_excesso_cdi, :desvio_excesso_cdi, "
+                    ":n_excesso_carteira, :desvio_excesso_carteira)"
                 ),
                 {"e": execucao_id, **linha},
             )
@@ -436,8 +438,28 @@ def agregar(avaliacoes: list[Avaliacao]) -> list[dict]:
             "retorno_medio": _media([r.retorno_liquido for r in resultados]),
             "excesso_cdi": _media([r.excesso_cdi for r in resultados]),
             "excesso_carteira": _media([r.excesso_carteira for r in resultados]),
+            # Para o intervalo de confianca (TASK-30): o gestor calcula
+            # media +- 1,96 x desvio / raiz(n) com o n de quem TEM o valor.
+            "n_excesso_cdi": _contagem([r.excesso_cdi for r in resultados]),
+            "desvio_excesso_cdi": _desvio([r.excesso_cdi for r in resultados]),
+            "n_excesso_carteira": _contagem([r.excesso_carteira for r in resultados]),
+            "desvio_excesso_carteira": _desvio([r.excesso_carteira for r in resultados]),
         })
     return linhas
+
+
+def _contagem(valores) -> int:
+    return sum(1 for v in valores if v is not None)
+
+
+def _desvio(valores) -> Decimal | None:
+    """Desvio-padrao amostral; None com menos de 2 valores (nao ha dispersao)."""
+    presentes = [float(v) for v in valores if v is not None]
+    if len(presentes) < 2:
+        return None
+    media = sum(presentes) / len(presentes)
+    variancia = sum((v - media) ** 2 for v in presentes) / (len(presentes) - 1)
+    return Decimal(str(variancia ** 0.5)).quantize(Decimal("0.000001"))
 
 
 def _media(valores) -> Decimal | None:
