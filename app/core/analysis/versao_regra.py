@@ -22,4 +22,6 @@ saida NAO incrementa. Formato: AAAA.MM.DD-N (data da mudanca + sequencial).
 #                 Number (ISS-F2); faixa neutra e limiares em limiares.py
 #                 (ISS-F3), venda abaixo de -15%. Viveu algumas horas.
 #   2026.09.27-2  Mesma regra com a venda calibrada em -100% (DEC-07).
-VERSAO_REGRA = "2026.09.27-2"
+#   2026.09.27-3  Crescimento nominal (g real + IPCA 12m) no Graham, venda
+#                 abaixo de -150% (TASK-54, DEC-08).
+VERSAO_REGRA = "2026.09.27-3"

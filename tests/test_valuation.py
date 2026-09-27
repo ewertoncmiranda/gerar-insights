@@ -11,6 +11,10 @@ from app.core.analysis.valuation import (
     normalizar_lpa,
 )
 
+# Estes testes cobrem Graham Number, referencia sem juros e validade - nao o
+# modo de juros (TASK-54). Fixam o modo G_REAL para nao depender do IPCA.
+MODO_FIXO = Limiares(modo_juros="G_REAL")
+
 
 def snapshot(price=10.0, eps=2.0, pl=None):
     return MarketSnapshot(
@@ -118,7 +122,7 @@ def test_graham_number_none_com_lpa_negativo():
 # --- ValuationAnalyzer: integracao ---------------------------------------
 
 def test_analyze_marca_preco_ate_graham_number():
-    analyzer = ValuationAnalyzer()
+    analyzer = ValuationAnalyzer(limiares=MODO_FIXO)
     resultado = analyzer.analyze(
         snapshot=snapshot(price=10.0, eps=2.0),
         taxa_juros=4.4,
@@ -131,7 +135,7 @@ def test_analyze_marca_preco_ate_graham_number():
 
 
 def test_analyze_sinaliza_quando_preco_passa_do_graham_number():
-    analyzer = ValuationAnalyzer()
+    analyzer = ValuationAnalyzer(limiares=MODO_FIXO)
     resultado = analyzer.analyze(
         snapshot=snapshot(price=50.0, eps=2.0),
         taxa_juros=4.4,
@@ -144,14 +148,14 @@ def test_analyze_sinaliza_quando_preco_passa_do_graham_number():
 def test_analyze_mantem_cenario_sem_ajuste_como_referencia():
     """A formula de 1962 (Y=4,4) continua calculada, mas so como referencia -
     nao decide a recomendacao (isso e feito com o cenario ajustado)."""
-    analyzer = ValuationAnalyzer()
+    analyzer = ValuationAnalyzer(limiares=MODO_FIXO)
     resultado = analyzer.analyze(snapshot=snapshot(price=10.0, eps=2.0), taxa_juros=8.8)
     assert resultado["cenarios_graham"]["base"]["preco_justo"] == 14.5
     assert resultado["cenarios_graham_sem_ajuste_juros"]["base"]["preco_justo"] == 29.0
 
 
 def test_analyze_invalido_sem_lpa():
-    analyzer = ValuationAnalyzer()
+    analyzer = ValuationAnalyzer(limiares=MODO_FIXO)
     resultado = analyzer.analyze(snapshot=snapshot(price=10.0, eps=None), taxa_juros=4.4)
     assert resultado["valido"] is False
     assert resultado["cenarios_graham"] is None

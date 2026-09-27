@@ -173,7 +173,7 @@ def test_versao_da_regra_esta_fixada():
     Este teste existe para a mudanca de regra nao passar despercebida: sinais
     de regras diferentes nao podem cair no mesmo placar.
     """
-    assert VERSAO_REGRA == "2026.09.27-2"
+    assert VERSAO_REGRA == "2026.09.27-3"
 
 
 # --- proventos (Item 3, 27/09/2026) --------------------------------------

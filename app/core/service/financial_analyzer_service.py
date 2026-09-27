@@ -53,14 +53,19 @@ class FinancialAnalyzerService:
             )
 
         lpas_anuais, vpa = self.fundamentos_cvm_service.historico(db, snapshot.symbol)
+        # Modos G_NOMINAL e Y_REAL usam o IPCA 12m ja divulgado (TASK-54, DEC-08).
+        precisa_ipca = self.valuation_analyzer.limiares.modo_juros != "G_REAL"
+        ipca = self.taxa_juros_service.ipca_12m(db) if precisa_ipca else None
         valuation = self.valuation_analyzer.analyze(
-            snapshot, taxa[0], f"SELIC_META {taxa[1].isoformat()}", lpas_anuais, vpa
+            snapshot, taxa[0], f"SELIC_META {taxa[1].isoformat()}", lpas_anuais, vpa, ipca
         )
         if not valuation["valido"]:
             # Media dos ultimos exercicios negativa: sem lucro normalizado nao
             # ha preco justo (ISS-F2).
             return self._resultado_nulo(
-                snapshot.symbol, ativo.get("dedupKey"), f"LPA normalizado nao positivo ({valuation['fonte_lpa']})"
+                snapshot.symbol, ativo.get("dedupKey"),
+                "IPCA 12m indisponivel" if valuation["modo_juros"] != "G_REAL" and ipca is None
+                else f"LPA normalizado nao positivo ({valuation['fonte_lpa']})",
             )
         technical_context = self.technical_analyzer.analyze(snapshot)
         recommendation = self.recommendation_policy.evaluate(snapshot, valuation, technical_context)

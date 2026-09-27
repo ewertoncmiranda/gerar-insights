@@ -10,13 +10,21 @@ no maximo JANELA_FUTURA_DIAS, para nao usar uma meta que ainda nao vale.
 from __future__ import annotations
 
 import time
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import text
 
 CODIGO_SELIC = "SELIC"
 JANELA_FUTURA_DIAS = 60
 CACHE_SEGUNDOS = 3600
+# IPCA do mes M sai por volta do dia 10 de M+1; indice_macro grava o dia 1 de
+# M. Mesma defasagem do backtest (app/validacao/ponto_no_tempo.py).
+DEFASAGEM_IPCA_DIAS = 42
+
+_SQL_IPCA = text(
+    "SELECT valor FROM indice_macro WHERE codigo_serie = 'IPCA' AND valor IS NOT NULL "
+    "AND data <= :limite ORDER BY data DESC LIMIT 12"
+)
 
 _SQL = text(
     "SELECT valor, data FROM indice_macro "
@@ -44,3 +52,15 @@ class TaxaJurosService:
         if dia is None:
             self._cache = (self._relogio(), taxa, data_ponto)
         return taxa, data_ponto
+
+    def ipca_12m(self, db, dia: date | None = None) -> float | None:
+        """IPCA acumulado nos 12 ultimos meses ja divulgados ate `dia` (% ).
+        None sem 12 meses - quem usa (Graham modo G_NOMINAL/Y_REAL) fica sem valor."""
+        limite = (dia or date.today()) - timedelta(days=DEFASAGEM_IPCA_DIAS)
+        meses = [float(v) for (v,) in db.execute(_SQL_IPCA, {"limite": limite})]
+        if len(meses) < 12:
+            return None
+        fator = 1.0
+        for mes in meses:
+            fator *= 1 + mes / 100
+        return (fator - 1) * 100

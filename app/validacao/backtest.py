@@ -147,6 +147,7 @@ def recomendar_v1(
     lpa: float | None = None,
     lpas_anuais: list[float] | None = None,
     vpa: float | None = None,
+    ipca_12m: float | None = None,
 ) -> str:
     """Exatamente o caminho dos insights (ValuationAnalyzer + RecommendationPolicy),
     alimentado com o snapshot do dia."""
@@ -157,7 +158,9 @@ def recomendar_v1(
         open_price=None, previous_close=None, day_high=None, day_low=None, volume=None, market_cap=None,
         fifty_two_week_low=amostra.minima_52s, fifty_two_week_high=amostra.maxima_52s,
     )
-    valuation = ValuationAnalyzer(limiares=limiares).analyze(snapshot, taxa_juros, "BACKTEST", lpas_anuais, vpa)
+    valuation = ValuationAnalyzer(limiares=limiares).analyze(
+        snapshot, taxa_juros, "BACKTEST", lpas_anuais, vpa, ipca_12m
+    )
     if not valuation["valido"]:
         return "SEM_DADOS"
     contexto = TechnicalContextAnalyzer().analyze(snapshot)
@@ -166,14 +169,22 @@ def recomendar_v1(
 
 def regra_v1_antiga(a: Amostra) -> str:
     """2026.09.26-1: sem juros (Y = 4,4), LPA do ultimo anual, venda com margem < 0."""
-    return recomendar_v1(a, Limiares(margem_venda=0.0), TAXA_REFERENCIA_GRAHAM, a.lpa_anual)
+    # Tudo fixado explicitamente: se dependesse dos padroes de Limiares, a
+    # regra "antiga" mudaria a cada calibracao (e sumiu quando o padrao virou
+    # G_NOMINAL, que exige IPCA).
+    return recomendar_v1(
+        a, Limiares(margem_venda=0.0, modo_juros="G_REAL", multiplo_base=8.5, margem_compra_forte=20.0,
+                    ey_compra_forte=12.0, margem_compra_moderada=20.0, ey_compra_moderada=8.0,
+                    posicao_alerta=90.0, margem_alerta=10.0, anos_lpa_min=99),
+        TAXA_REFERENCIA_GRAHAM, a.lpa_anual,
+    )
 
 
 def regra_v1_atual(a: Amostra, limiares: Limiares = LIMIARES_ATUAIS) -> str:
     """VERSAO_REGRA: Selic como Y (CDI anualizado quando nao ha historico da
     Selic no dia), LPA normalizado pelos anuais entregues, Graham Number."""
     taxa = a.selic if a.selic is not None else a.juros_cdi
-    return recomendar_v1(a, limiares, taxa, a.lpa_recente, a.lpas_anuais, a.vpa)
+    return recomendar_v1(a, limiares, taxa, a.lpa_recente, a.lpas_anuais, a.vpa, a.ipca_12m)
 
 
 def regra_v2(a: Amostra) -> str:

@@ -26,12 +26,20 @@ class Limiares:
     margem_compra_moderada: float = 20.0
     ey_compra_moderada: float = 8.0
     # Faixa neutra (ISS-F3): entre margem_venda e 0 e MANTER; so abaixo e venda.
-    # -100 calibrado em 2026-09-27 (DEC-07): com o fator 4,4/Selic as margens
-    # ficam muito negativas, e -15 punha 92% do teste em venda.
-    margem_venda: float = -100.0
+    # -100 na DEC-07 (modo G_REAL); -150 na DEC-08, com o modo G_NOMINAL.
+    margem_venda: float = -150.0
     # Alerta de risco: perto da maxima de 52 semanas com pouca margem.
     posicao_alerta: float = 90.0
     margem_alerta: float = 10.0
+
+    # Como juros e crescimento se combinam no Graham (TASK-54, DEC-08):
+    #   G_REAL    Y = Selic (nominal), g real (0/3/5) - a versao 2026.09.27-2;
+    #             dependia do regime de juros (DEC-07);
+    #   G_NOMINAL Y = Selic, g = real + IPCA 12m (como a v2);
+    #   Y_REAL    Y = Selic - IPCA 12m (piso de 2%), g real.
+    # Adotado G_NOMINAL (DEC-08): fracao de vendas 20% -> 32% da calibracao
+    # para o teste, contra 49% -> 70% no G_REAL.
+    modo_juros: str = "G_NOMINAL"
 
     # LPA normalizado (ISS-F2): media dos ultimos anos entregues a CVM.
     anos_lpa_min: int = 3
