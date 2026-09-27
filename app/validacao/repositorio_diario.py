@@ -38,8 +38,11 @@ class RepositorioDiario:
             text("SELECT MIN(data) FROM candle_diario WHERE data > :d"), {"d": data_pregao}
         ).scalar()
 
-    def ultimo_insight(self, db, simbolo: str, inicio_utc: datetime, fim_utc: datetime):
-        """Insight mais recente do ativo na janela, ignorando SEM_DADOS."""
+    def ultimo_insight(self, db, simbolo: str, inicio_utc: datetime, fim_utc: datetime,
+                       data_pregao: date | None = None):
+        """Insight mais recente do ativo na janela, ignorando SEM_DADOS.
+        data_pregao: usado pela especializacao sobre o preco oficial
+        (repositorio_diario_oficial.py); aqui a janela de horario basta."""
         linha = db.execute(
             text(
                 "SELECT id, recomendacao, detalhes_json FROM insight_acao "
