@@ -18,9 +18,11 @@ Como funciona:
   - Sinais ate o corte formam a CALIBRACAO (onde e licito ajustar limiar);
     depois dele, o TESTE, que nao pode ser usado para ajustar nada.
 
-Limites conhecidos, gravados em observacoes: preco sem proventos (pagadora de
-dividendo parece pior), universo de hoje olhando para tras (vies de
-sobrevivencia) e TTM so existe para os ultimos anos carregados.
+Limites conhecidos, gravados em observacoes: proventos so cobrem eventos a
+partir de 27/09/2026 (ver app/validacao/proventos.py - fonte da B3 so devolve
+os ultimos ~12 meses por consulta, sinais mais antigos ficam sem ajuste),
+universo de hoje olhando para tras (vies de sobrevivencia) e TTM so existe
+para os ultimos anos carregados.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ from app.core.analysis.regra_v2 import VERSAO_REGRA_V2, EntradaV2, posicao_no_ra
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
 from app.core.analysis.valuation import TAXA_REFERENCIA_GRAHAM, ValuationAnalyzer
 from app.core.analysis.versao_regra import VERSAO_REGRA
+from app.validacao.proventos import agrupar_por_emissor_e_data, codigo_emissor
 from app.validacao.avaliador import (
     CUSTO_IDA_E_VOLTA_PADRAO,
     HORIZONTES_PREGOES,
@@ -202,6 +205,11 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
         for d, v in db.execute(text("SELECT data, valor FROM indice_macro WHERE codigo_serie='CDI' AND valor IS NOT NULL"))
     }
     datas_cdi = sorted(cdi)
+    # provento_distribuido e do gestor-ativos-brutos (ClienteB3Proventos); so
+    # tem cobertura a partir de 27/09/2026 (limite da fonte, ver proventos.py).
+    proventos_por_emissor = agrupar_por_emissor_e_data(
+        db.execute(text("SELECT simbolo, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido")).all()
+    )
 
     observacoes = []
     sem_serie = sorted(universo - set(series))
@@ -257,6 +265,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
                 resultado = avaliar(
                     dia, None, serie[i : i + horizonte + 1], horizonte,
                     carteira=carteira_entre(entrada, saida), cdi_diario=cdi_entre(entrada, saida),
+                    proventos=proventos_por_emissor.get(codigo_emissor(simbolo), {}),
                 )
                 if resultado is not None:
                     amostra.resultados[horizonte] = resultado
@@ -332,7 +341,11 @@ class Backtest:
                 f"{suspeitas} de {janelas} janelas com salto de {LIMIAR_SALTO_SUSPEITO:.0%} ou mais "
                 "(provável desdobramento) ficaram fora do placar"
             )
-        observacoes.append("Preço sem proventos; universo de hoje aplicado ao passado (viés de sobrevivência).")
+        observacoes.append(
+            "Retorno inclui proventos (data-com) só a partir de 27/09/2026 - fonte da B3 só "
+            "cobre os últimos ~12 meses por consulta; sinais anteriores não têm ajuste."
+        )
+        observacoes.append("Universo de hoje aplicado ao passado (viés de sobrevivência).")
 
         placar = agregar(avaliacoes)
         self._validar(placar, avaliacoes)
@@ -359,7 +372,7 @@ class Backtest:
             "frequencia": "primeiro pregao de cada mes",
             "horizontes_pregoes": list(self._horizontes),
             "custo_ida_e_volta": str(CUSTO_IDA_E_VOLTA_PADRAO),
-            "fonte_preco": "B3 COTAHIST (bruto)",
+            "fonte_preco": "B3 COTAHIST (bruto) + proventos de provento_distribuido (so a partir de 27/09/2026)",
             "fonte_lucro": "CVM pela DT_RECEB; v1 atual: min(LPA recente, media de 3-5 anuais)",
             "fonte_juros": "v1: Selic meta vigente (DEC-02); v2: CDI anualizado",
             "ativos": sorted({a.simbolo for a in amostras}),

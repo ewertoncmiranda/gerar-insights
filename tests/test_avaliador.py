@@ -174,3 +174,39 @@ def test_versao_da_regra_esta_fixada():
     de regras diferentes nao podem cair no mesmo placar.
     """
     assert VERSAO_REGRA == "2026.09.27-2"
+
+
+# --- proventos (Item 3, 27/09/2026) --------------------------------------
+
+
+def test_provento_na_janela_soma_ao_retorno():
+    pregoes = serie(fechamentos=[10, 10, 10, 10], aberturas=[10, 10, 10, 10])
+    proventos = {pregoes[2].data: D("0.50")}  # data-com dentro da janela [entrada, saida)
+
+    resultado = avaliar(
+        pregoes[0].data, "COMPRA_FORTE", pregoes, horizonte=3,
+        custo_ida_e_volta=D(0), proventos=proventos,
+    )
+
+    # (10 + 0.50) / 10 - 1 = 0.05, nao 0 como seria so com o preco
+    assert resultado.retorno_bruto == D("0.05")
+    assert resultado.proventos_periodo == D("0.500000")
+
+
+def test_provento_fora_da_janela_nao_conta():
+    pregoes = serie(fechamentos=[10, 10, 10, 10], aberturas=[10, 10, 10, 10])
+    proventos = {pregoes[0].data: D("0.50")}  # data-com ANTES da entrada
+
+    resultado = avaliar(
+        pregoes[0].data, "COMPRA_FORTE", pregoes, horizonte=3,
+        custo_ida_e_volta=D(0), proventos=proventos,
+    )
+
+    assert resultado.retorno_bruto == D("0")
+    assert resultado.proventos_periodo == D("0")
+
+
+def test_sem_proventos_retorno_e_so_de_preco():
+    pregoes = serie(fechamentos=[10, 11, 12, 13], aberturas=[10, 10.5, 11.5, 12.5])
+    resultado = avaliar(pregoes[0].data, "COMPRA_FORTE", pregoes, horizonte=3, custo_ida_e_volta=D(0))
+    assert resultado.proventos_periodo == D("0")
