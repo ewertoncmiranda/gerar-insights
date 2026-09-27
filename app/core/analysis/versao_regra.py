@@ -20,5 +20,6 @@ saida NAO incrementa. Formato: AAAA.MM.DD-N (data da mudanca + sequencial).
 #   2026.09.26-1  Graham sem juros, LPA do snapshot, venda com margem < 0.
 #   2026.09.27-1  Y = Selic meta (ISS-F1, DEC-02); LPA normalizado e Graham
 #                 Number (ISS-F2); faixa neutra e limiares em limiares.py
-#                 (ISS-F3); ver DEC-07 para a calibracao.
-VERSAO_REGRA = "2026.09.27-1"
+#                 (ISS-F3), venda abaixo de -15%. Viveu algumas horas.
+#   2026.09.27-2  Mesma regra com a venda calibrada em -100% (DEC-07).
+VERSAO_REGRA = "2026.09.27-2"
