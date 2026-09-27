@@ -7,7 +7,9 @@ from app.core.analysis.market_snapshot import MarketSnapshot
 from app.core.analysis.recommendation import RecommendationPolicy
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
 from app.core.analysis.valuation import ValuationAnalyzer
+from app.core.service.fundamentos_cvm_service import FundamentosCvmService
 from app.core.service.serie_tecnica_service import SerieTecnicaService
+from app.core.service.taxa_juros_service import TaxaJurosService
 
 
 class FinancialAnalyzerService:
@@ -19,6 +21,8 @@ class FinancialAnalyzerService:
         recommendation_policy: RecommendationPolicy | None = None,
         payload_builder: InsightPayloadBuilder | None = None,
         serie_tecnica_service: SerieTecnicaService | None = None,
+        taxa_juros_service: TaxaJurosService | None = None,
+        fundamentos_cvm_service: FundamentosCvmService | None = None,
     ):
         self.logger = logger
         self.valuation_analyzer = valuation_analyzer or ValuationAnalyzer()
@@ -26,6 +30,8 @@ class FinancialAnalyzerService:
         self.recommendation_policy = recommendation_policy or RecommendationPolicy()
         self.payload_builder = payload_builder or InsightPayloadBuilder()
         self.serie_tecnica_service = serie_tecnica_service or SerieTecnicaService()
+        self.taxa_juros_service = taxa_juros_service or TaxaJurosService()
+        self.fundamentos_cvm_service = fundamentos_cvm_service or FundamentosCvmService()
 
     def gerar_insight_fundamentalista(self, db: Session, ativo: dict) -> dict:
         snapshot = MarketSnapshot.from_payload(ativo)
@@ -37,7 +43,25 @@ class FinancialAnalyzerService:
         if not snapshot.has_valid_fundamentals():
             return self._resultado_nulo(snapshot.symbol, ativo.get("dedupKey"))
 
-        valuation = self.valuation_analyzer.analyze(snapshot)
+        # DEC-02: sem Selic no banco nao ha Y; SEM_DADOS em vez de cair na
+        # formula sem juros e misturar duas regras sob a mesma versao.
+        taxa = self.taxa_juros_service.taxa_vigente(db)
+        if taxa is None:
+            self.logger.warning(f"Sem Selic em indice_macro; {snapshot.symbol} fica SEM_DADOS")
+            return self._resultado_nulo(
+                snapshot.symbol, ativo.get("dedupKey"), "Taxa livre de risco (Selic) indisponivel"
+            )
+
+        lpas_anuais, vpa = self.fundamentos_cvm_service.historico(db, snapshot.symbol)
+        valuation = self.valuation_analyzer.analyze(
+            snapshot, taxa[0], f"SELIC_META {taxa[1].isoformat()}", lpas_anuais, vpa
+        )
+        if not valuation["valido"]:
+            # Media dos ultimos exercicios negativa: sem lucro normalizado nao
+            # ha preco justo (ISS-F2).
+            return self._resultado_nulo(
+                snapshot.symbol, ativo.get("dedupKey"), f"LPA normalizado nao positivo ({valuation['fonte_lpa']})"
+            )
         technical_context = self.technical_analyzer.analyze(snapshot)
         recommendation = self.recommendation_policy.evaluate(snapshot, valuation, technical_context)
         sinal_tecnico = self.serie_tecnica_service.avaliar(db, snapshot)
@@ -53,7 +77,12 @@ class FinancialAnalyzerService:
             "detalhes_json": details,
         }
 
-    def _resultado_nulo(self, simbolo: str, dedup_key: str | None) -> dict:
+    def _resultado_nulo(
+        self,
+        simbolo: str,
+        dedup_key: str | None,
+        aviso: str = "Dados fundamentais insuficientes ou lucro negativo",
+    ) -> dict:
         return {
             "dedup_key": dedup_key,
             "simbolo": simbolo,
@@ -62,6 +91,6 @@ class FinancialAnalyzerService:
             "recomendacao": "SEM_DADOS",
             "detalhes_json": {
                 "versao_payload": "2.0",
-                "aviso": "Dados fundamentais insuficientes ou lucro negativo",
+                "aviso": aviso,
             },
         }
