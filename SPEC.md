@@ -50,7 +50,7 @@ Regras:
 ### 2.2 Fila `sqs-registrar-series-historicas` (série histórica)
 - Entrada: resposta BRAPI com `results[].data.historicalDataPrice` (candles).
 - Ação: *upsert* de candles diários em `serie_historica` com chave única `(simbolo, data_pregao, intervalo)`. A data do pregão é derivada do timestamp Unix convertido para UTC-3 (Brasília), com fallback para `dataFormatada` (`dd/mm/aaaa`).
-- Observação: os dados históricos **ainda não são usados** na análise (ver `ISS-F5`).
+- Observação: os dados históricos entram como sinais técnicos separados (momentum, reversão à média), não na recomendação de valuation (ver `ISS-F5`).
 
 ---
 
@@ -279,7 +279,7 @@ Avaliada na ordem abaixo; vale a primeira regra verdadeira:
 | REQ-04 | Gerar recomendação, risco, confiança, insights e fatores de decisão conforme a seção 5 | IMPLEMENTADO |
 | REQ-05 | Retornar `SEM_DADOS` quando os fundamentos forem inválidos | IMPLEMENTADO |
 | REQ-06 | Fazer upsert idempotente de candles diários em `serie_historica` | IMPLEMENTADO (não commitado) |
-| REQ-07 | Usar a série histórica (MM20, z-score, volume relativo) na recomendação | PLANEJADO (`TASK-30`..`TASK-32`) |
+| REQ-07 | Usar a série histórica (MM20, z-score, volume relativo) na recomendação | PARCIAL: calculado e gravado como sinal técnico (`TASK-30`, `TASK-31`); combinação com a recomendação depende de medição |
 | REQ-08 | Ajustar o valuation pela taxa livre de risco brasileira | PLANEJADO (`TASK-20`) |
 | REQ-09 | Incluir aviso (disclaimer) de caráter não-recomendatório no payload | PLANEJADO (`TASK-23`) |
 
@@ -298,7 +298,7 @@ Critérios de aceite de referência (devem virar testes):
 | NFR-03 | **Resiliência:** mensagens que falham repetidamente vão para uma DLQ após N tentativas | ATENDIDO na infraestrutura (2026-09-26) |
 | NFR-04 | **Observabilidade:** logs estruturados em JSON, nível configurável, sem duplicação | NÃO ATENDIDO (`ISS-08`) |
 | NFR-05 | **Segurança:** nenhum segredo ou ambiente virtual dentro da imagem; container sem root | NÃO ATENDIDO (`ISS-04`) |
-| NFR-06 | **Testabilidade:** `app/core/analysis` com cobertura ≥ 90%; suíte verde no CI | NÃO ATENDIDO (`ISS-03`, `ISS-05`) |
+| NFR-06 | **Testabilidade:** `app/core/analysis` com cobertura ≥ 90%; suíte verde no CI | PARCIAL — suíte verde (`ISS-03` concluído), `valuation`/`recommendation`/`technical_series` testados; % de cobertura não medido; CI ainda não roda pytest (`ISS-05`) |
 | NFR-07 | **Configuração:** toda configuração vem de `Settings` (fonte única) | PARCIAL (`ISS-10`) |
 | NFR-08 | **Pureza do domínio:** `app/core/analysis` sem I/O, determinístico | ATENDIDO |
 
@@ -314,7 +314,7 @@ Severidade: **Crítico** (perda/corrupção de dados ou segurança), **Alto**, *
 |---|---|---|---|---|---|---|
 | ISS-01 | Crítico | Repositórios faziam `commit()` interno, anulando a transação do processor | Repositórios agora usam `flush`; `CoreProcessor` é o único dono do commit | Evita persistência parcial | Coberto por teste da unidade de trabalho | CONCLUIDO (2026-09-26) |
 | ISS-02 | Alto | Fila de ativos sem idempotência (SQS entrega *at-least-once*) | `dedup_key` propagada pelo produtor ou calculada de forma determinística no consumidor | Evita duplicatas em reentrega | Índices únicos + consulta idempotente | CONCLUIDO (2026-09-26) |
-| ISS-03 | Alto | Suíte de testes quebrada e sem cobertura do domínio atual | `tests/test_trading_service.py:8`, `tests/test_aggregator_service.py:8`, `tests/test_e2e_flow.py:70,128` importam `TradingService`/`AggregatorService`, que não existem | Falha na coleta do pytest; regras financeiras sem rede de segurança | Remover/reescrever testes legados; criar testes para `app/core/analysis/*` e `historical_series` | ABERTO (confirmado por leitura; pytest não executado) |
+| ISS-03 | Alto | ~~Suíte de testes quebrada e sem cobertura do domínio atual~~ | Testes legados (`test_trading_service.py` etc.) já removidos; `pytest tests -q` roda limpo | ~~Falha na coleta do pytest~~ | `app/core/analysis/valuation.py` e `recommendation.py` ganharam teste (`tests/test_valuation.py`, `tests/test_recommendation.py`, 2026-09-27) — `historical_series`/`technical_series` já tinham (`test_technical_series_analyzer.py`). Cobertura de `%` não medida (falta rodar `pytest --cov`) | CONCLUIDO (2026-09-27, verificado ao vivo: `pytest tests/ -q` → 74 passed) |
 | ISS-04 | Crítico | Sem `.dockerignore`; `COPY . .` leva `.env.local`, `.venv`, `venv-local`, `.git`, `.idea` para a imagem pública; roda como root | `Dockerfile:5` | Vazamento de credenciais no Docker Hub; imagem grande | `.dockerignore`, build multi-stage, `USER` não-root | ABERTO |
 | ISS-05 | Alto | CI publica a imagem (inclusive `latest`) sem rodar testes/lint | `.github/workflows/02-docker-build-push.yml:40,46` | Imagem quebrada em produção | Job `test` (pytest + ruff) como pré-requisito; `latest` só a partir de `main`/tag | ABERTO |
 | ISS-06 | Alto | Erros não-de-dados causam retry infinito; sem DLQ | `app/core/core_processor.py:103` | Mensagem venenosa consome recursos para sempre e polui logs | Redrive policy com DLQ (`maxReceiveCount`), ou checar `ApproximateReceiveCount` | ABERTO |
@@ -331,11 +331,11 @@ Severidade: **Crítico** (perda/corrupção de dados ou segurança), **Alto**, *
 
 | ID | Sev. | Problema | Impacto | Correção sugerida | Status |
 |---|---|---|---|---|---|
-| ISS-F1 | Alto | Graham **sem ajuste de juros**. A fórmula revisada (1974) é `V = LPA × (8,5 + 2g) × 4,4 / Y`, onde `Y` é o rendimento de títulos AAA. Com juros brasileiros muito acima de 4,4%, omitir o fator infla `V` sistematicamente | Viés estrutural para `COMPRA_*` | Parametrizar `Y` (ex.: NTN-B longa ou Selic) via configuração; manter o cenário sem ajuste só como referência | ABERTO |
-| ISS-F2 | Alto | LPA dos últimos 12 meses sem normalização nem filtro de qualidade | Empresas cíclicas (commodities, bancos) no pico do lucro saem como `COMPRA_FORTE` no topo do ciclo | LPA médio de 3 a 5 anos; filtros de ROE, endividamento e payout; Graham Number `√(22,5 × LPA × VPA)` (exige VPA no payload) | ABERTO |
-| ISS-F3 | Médio | `VENDA_VALUATION` sempre que MS base < 0 | Quase toda empresa de crescimento ou qualidade vira "venda"; o múltiplo 8,5 é referência dos EUA dos anos 1960 | Faixa neutra (ex.: −15% < MS < 0 → `MANTER`); múltiplo base configurável por setor | ABERTO |
+| ISS-F1 | Alto | ~~Graham sem ajuste de juros~~ | `app/core/analysis/valuation.py` (`GrahamValuation`, `fator_de_juros`) | ~~Viés estrutural para `COMPRA_*`~~ | `Y` = Selic meta vigente (`indice_macro`, ver `DEC-02`); cenário sem ajuste preservado só como referência em `cenarios_graham_sem_ajuste_juros`, fora da recomendação. Testado em `tests/test_valuation.py` | CONCLUIDO (2026-09-27) |
+| ISS-F2 | Alto | ~~LPA dos últimos 12 meses sem normalização~~ | `app/core/analysis/valuation.py` (`normalizar_lpa`, `graham_number`) | ~~Cíclica no pico do lucro saía `COMPRA_FORTE`~~ | LPA = mínimo entre o atual e a média de 3–5 anos entregues à CVM; Graham Number como segunda trava de `COMPRA_FORTE` (rebaixa para `COMPRA_MODERADA` se o preço passa do número). Testado em `tests/test_valuation.py` | CONCLUIDO (2026-09-27) |
+| ISS-F3 | Médio | ~~`VENDA_VALUATION` sempre que MS base < 0~~ | `app/core/analysis/limiares.py` (`margem_venda`), `app/core/analysis/recommendation.py` | ~~Quase toda empresa de crescimento virava "venda"~~ | Faixa neutra: `margem_venda` (−15%) < MS base < 0 → `MANTER`; só abaixo de −15% é `VENDA_VALUATION`. Múltiplo-base (`multiplo_base`, 8,5) já é parâmetro em `Limiares`, não constante. Testado em `tests/test_recommendation.py` | CONCLUIDO (2026-09-27) |
 | ISS-F4 | Médio | Limiares (20%, 12%, 85/90) e score de confiança são heurísticos, sem backtest ou calibração; sem noção de setor | Confiança sem significado estatístico | Backtest (`TASK-40`); limiares configuráveis e versionados | ABERTO |
-| ISS-F5 | Médio | Recomendação baseada em um único snapshot; a série histórica ingerida não é usada | Momentum e Mean Reversion ficam inertes | `TASK-30`..`TASK-32` | ABERTO |
+| ISS-F5 | Médio | A recomendação principal (valuation) usa um único snapshot; a série histórica entra só como sinal técnico separado | Momentum e reversão à média já são calculados sobre a série (≥ 20 candles) e gravados no insight e no diário, mas não pesam na recomendação; o acerto deles ainda não foi medido | Medir os sinais técnicos no diário/backtest antes de combiná-los à recomendação | PARCIAL (TASK-30, TASK-31 concluídas) |
 | ISS-F6 | Médio | Rótulos "COMPRA/VENDA" podem configurar recomendação de investimento (atividade regulada pela CVM, Res. 20/2021) | Risco regulatório/reputacional se exposto a usuários finais | Rotular como "sinal quantitativo", incluir disclaimer no payload, revisar com jurídico | ABERTO |
 
 ---
@@ -371,7 +371,7 @@ Cada tarefa referencia os itens que resolve. Ordem sugerida: fases 0 → 4. Dent
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-20 | Graham com ajuste `× 4,4 / Y`, com `Y` configurável | ISS-F1, REQ-08 | *Dado* `LPA=2`, `g=3`, `Y=4,4`, *então* `V=29`; *dado* `Y=8,8`, *então* `V=14,5` | TASK-04, DEC-02 | ABERTO |
+| TASK-20 | Graham com ajuste `× 4,4 / Y`, com `Y` configurável | ISS-F1, REQ-08 | *Dado* `LPA=2`, `g=3`, `Y=4,4`, *então* `V=29`; *dado* `Y=8,8`, *então* `V=14,5` — ambos os casos em `tests/test_valuation.py::test_criterio_aceite_task20_*` | TASK-04, DEC-02 | CONCLUIDO (2026-09-27) |
 | TASK-21 | Aceitar VPA e calcular o Graham Number como métrica complementar | ISS-F2 | Campo `graham_number` no payload quando houver VPA > 0 | contrato com o produtor Java | ABERTO |
 | TASK-22 | Faixa neutra para `VENDA_VALUATION`; limiares em configuração versionada | ISS-F3, ISS-F4 | Limiares lidos de config; testes cobrem as bordas | TASK-04 | ABERTO |
 | TASK-23 | `versao_payload = "3.0"` com campo `aviso_legal` e rótulos revisados | ISS-F6, REQ-09 | Todo insight contém `aviso_legal`; consumidores informados | DEC-05 | ABERTO |
@@ -380,8 +380,8 @@ Cada tarefa referencia os itens que resolve. Ordem sugerida: fases 0 → 4. Dent
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-30 | Serviço de indicadores sobre `serie_historica`: MM20, volume médio 20d, z-score 52s | ISS-F5, REQ-07 | Funções puras testadas com séries sintéticas | TASK-01, TASK-04 | ABERTO |
-| TASK-31 | Conectar `MomentumStrategy` e `MeanReversionStrategy` à `RecommendationPolicy` como sinais técnicos | ISS-F5 | `detalhes_json.sinais_tecnicos` preenchido quando houver ≥ 20 candles | TASK-30 | ABERTO |
+| TASK-30 | Serviço de indicadores sobre `serie_historica`: MM20, volume médio 20d, z-score 52s | ISS-F5, REQ-07 | Funções puras testadas com séries sintéticas | TASK-01, TASK-04 | CONCLUIDO (2026-09-26): `app/core/analysis/technical_series.py`, com preço ajustado por proventos; testes em `tests/test_technical_series_analyzer.py` |
+| TASK-31 | Conectar `MomentumStrategy` e `MeanReversionStrategy` como sinais técnicos | ISS-F5 | Sinais preenchidos quando houver ≥ 20 candles | TASK-30 | CONCLUIDO (2026-09-26): `SerieTecnicaService` grava `sinal_momentum`/`sinal_reversao` em `detalhes_json.contexto_tecnico_serie` (nome real do campo, não `sinais_tecnicos`) e o diário os registra; eles NÃO alteram a recomendação principal, que segue a de valuation |
 | TASK-32 | Fonte de P/L setorial para `ValuationStrategy` (ou remover a estratégia) | ISS-F4 | Decisão registrada em DEC; estratégia ativa ou removida | DEC-06 | ABERTO |
 
 ### Fase 4 — Validação
@@ -402,7 +402,7 @@ Cada tarefa referencia os itens que resolve. Ordem sugerida: fases 0 → 4. Dent
 | ID | Pergunta | Opções | Status | Decisão / data |
 |---|---|---|---|---|
 | DEC-01 | Quem é dono do schema MySQL? | (a) app Java; (b) este worker via Alembic; (c) repositório de migrations compartilhado | ABERTO — decidido no nível do ecossistema (`infra#DEC-01`) | — |
-| DEC-02 | Qual taxa usar como `Y` no Graham ajustado? | NTN-B longa (real) / Selic / CDI / valor fixo configurável | ABERTO | — |
+| DEC-02 | Qual taxa usar como `Y` no Graham ajustado? | NTN-B longa (real) / Selic / CDI / valor fixo configurável | RESOLVIDO (2026-09-27): **Selic meta vigente** (SGS 432, `indice_macro.codigo_serie = 'SELIC'`, % a.a.), a do dia da análise; no backtest, a vigente na data do sinal. Motivos: é a única taxa livre de risco que o ecossistema já coleta (o gestor a grava e o painel a mostra em Índices); NTN-B longa exigiria ingerir os preços do Tesouro Direto e fica como evolução. Sem taxa disponível, o insight sai `SEM_DADOS` em vez de cair na fórmula sem ajuste (misturaria duas regras sob a mesma versão). A fórmula de 1962 (`Y = 4,4`, fator 1) continua calculada em `cenarios_graham_sem_ajuste_juros`, **só como referência histórica** — não entra na recomendação. Consequência conhecida: `Y` nominal com `g` real (0/3/5) é conservador; tratado nas sessões de ISS-F2/F3 | — |
 | DEC-03 | Política de retenção de `historico_acoes` | manter tudo / agregar por dia / expurgar após N dias | ABERTO | — |
 | DEC-04 | DynamoDB: implementar ou remover do projeto? | implementar / remover | RESOLVIDO: removido (config morta em `settings.py`/`aws_config.py`, nunca usada) | — |
 | DEC-05 | Nomenclatura das recomendações | manter COMPRA/VENDA / "sinal quantitativo" (ex.: `SINAL_POSITIVO_FORTE`) | ABERTO | — |

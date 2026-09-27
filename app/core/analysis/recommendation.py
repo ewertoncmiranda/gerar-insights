@@ -1,7 +1,11 @@
+from app.core.analysis.limiares import LIMIARES_ATUAIS, Limiares
 from app.core.analysis.market_snapshot import MarketSnapshot
 
 
 class RecommendationPolicy:
+    def __init__(self, limiares: Limiares = LIMIARES_ATUAIS):
+        self.limiares = limiares
+
     def evaluate(self, snapshot: MarketSnapshot, valuation: dict, technical_context: dict) -> dict:
         raw_context = technical_context["_raw"]
         recommendation = self.define_recommendation(valuation, raw_context["posicao_52w"])
@@ -25,17 +29,28 @@ class RecommendationPolicy:
         }
 
     def define_recommendation(self, valuation: dict, range_52w_position: float | None) -> str:
+        """Limiares em limiares.py (versionados). Duas travas contra falso
+        "barato": compra forte exige preco ate o Graham Number quando ha VPA
+        (ISS-F2), e so e venda abaixo da faixa neutra (ISS-F3)."""
+        limiares = self.limiares
         conservative_margin = valuation["cenarios_graham"]["conservador"]["margem_seguranca_percent"]
         base_margin = valuation["cenarios_graham"]["base"]["margem_seguranca_percent"]
         earnings_yield = valuation["earnings_yield"]
 
-        if conservative_margin >= 20 and earnings_yield >= 12:
+        if conservative_margin >= limiares.margem_compra_forte and earnings_yield >= limiares.ey_compra_forte:
+            # Acima do Graham Number: barato pelo lucro, caro pelo patrimonio.
+            if valuation.get("preco_ate_graham_number") is False:
+                return "COMPRA_MODERADA"
             return "COMPRA_FORTE"
-        if base_margin >= 20 and earnings_yield >= 8:
+        if base_margin >= limiares.margem_compra_moderada and earnings_yield >= limiares.ey_compra_moderada:
             return "COMPRA_MODERADA"
-        if base_margin < 0:
+        if base_margin < limiares.margem_venda:
             return "VENDA_VALUATION"
-        if range_52w_position is not None and range_52w_position >= 90 and base_margin <= 10:
+        if (
+            range_52w_position is not None
+            and range_52w_position >= limiares.posicao_alerta
+            and base_margin <= limiares.margem_alerta
+        ):
             return "ALERTA_RISCO"
         return "MANTER"
 

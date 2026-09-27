@@ -26,26 +26,37 @@ class Balanco:
     periodo: date
     tipo_periodo: str
     lpa: float
+    vpa: float | None = None
 
 
 class DadosPontoNoTempo:
-    def __init__(self, balancos: dict[str, list[Balanco]], cdi: dict[date, float], ipca: dict[date, float]):
+    def __init__(
+        self,
+        balancos: dict[str, list[Balanco]],
+        cdi: dict[date, float],
+        ipca: dict[date, float],
+        selic: dict[date, float] | None = None,
+    ):
         self._balancos = {s: sorted(b, key=lambda x: x.data_entrega) for s, b in balancos.items()}
         self._datas_cdi = sorted(cdi)
         self._cdi = cdi
         self._datas_ipca = sorted(ipca)
         self._ipca = ipca
+        self._datas_selic = sorted(selic or {})
+        self._selic = selic or {}
 
     @classmethod
     def carregar(cls, db) -> "DadosPontoNoTempo":
         balancos: dict[str, list[Balanco]] = {}
-        for simbolo, entrega, periodo, tipo, lpa in db.execute(
+        for simbolo, entrega, periodo, tipo, lpa, vpa in db.execute(
             text(
-                "SELECT simbolo, data_entrega, periodo, tipo_periodo, lpa FROM indicador_fundamentalista "
+                "SELECT simbolo, data_entrega, periodo, tipo_periodo, lpa, vpa FROM indicador_fundamentalista "
                 "WHERE data_entrega IS NOT NULL AND lpa IS NOT NULL"
             )
         ):
-            balancos.setdefault(simbolo, []).append(Balanco(entrega, periodo, tipo, float(lpa)))
+            balancos.setdefault(simbolo, []).append(
+                Balanco(entrega, periodo, tipo, float(lpa), None if vpa is None else float(vpa))
+            )
         cdi = {
             d: float(v)
             for d, v in db.execute(
@@ -58,7 +69,29 @@ class DadosPontoNoTempo:
                 text("SELECT data, valor FROM indice_macro WHERE codigo_serie = 'IPCA' AND valor IS NOT NULL")
             )
         }
-        return cls(balancos, cdi, ipca)
+        selic = {
+            d: float(v)
+            for d, v in db.execute(
+                text("SELECT data, valor FROM indice_macro WHERE codigo_serie = 'SELIC' AND valor IS NOT NULL")
+            )
+        }
+        return cls(balancos, cdi, ipca, selic)
+
+    def anuais_em(self, simbolo: str, dia: date, anos: int = 5) -> tuple[list[float], float | None]:
+        """LPAs dos ultimos exercicios anuais ja entregues ate `dia` (mais
+        recente primeiro) e o VPA do mais recente - o que o worker le da CVM."""
+        conhecidos = sorted(
+            (b for b in self._balancos.get(simbolo, []) if b.tipo_periodo == "ANUAL" and b.data_entrega <= dia),
+            key=lambda b: b.periodo,
+            reverse=True,
+        )[:anos]
+        vpa = next((b.vpa for b in conhecidos if b.vpa is not None), None)
+        return [b.lpa for b in conhecidos], vpa
+
+    def selic_em(self, dia: date) -> float | None:
+        """Selic meta (% a.a.) vigente em `dia` (DEC-02); None sem historico."""
+        i = bisect.bisect_right(self._datas_selic, dia)
+        return self._selic[self._datas_selic[i - 1]] if i else None
 
     def lpa_em(self, simbolo: str, dia: date, usar_ttm: bool = True) -> tuple[float | None, str]:
         """LPA do documento mais recente ja entregue ate `dia`.
