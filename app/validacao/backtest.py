@@ -18,11 +18,13 @@ Como funciona:
   - Sinais ate o corte formam a CALIBRACAO (onde e licito ajustar limiar);
     depois dele, o TESTE, que nao pode ser usado para ajustar nada.
 
-Limites conhecidos, gravados em observacoes: proventos so cobrem eventos a
-partir de 27/09/2026 (ver app/validacao/proventos.py - fonte da B3 so devolve
-os ultimos ~12 meses por consulta, sinais mais antigos ficam sem ajuste),
-universo de hoje olhando para tras (vies de sobrevivencia) e TTM so existe
-para os ultimos anos carregados.
+Limites conhecidos, gravados em observacoes: proventos cobrem uma janela
+movel de ~12 meses anteriores a CADA coleta da B3 (ver app/validacao/
+proventos.py - confirmado: a primeira coleta em 27/09/2026 trouxe eventos
+desde 26/09/2025), nao um corte fixo dali pra frente; sinais fora dessa
+janela ficam sem ajuste por ausencia de dado. Alem disso, universo de hoje
+olhando para tras (vies de sobrevivencia) e TTM so existe para os ultimos
+anos carregados.
 """
 
 from __future__ import annotations
@@ -145,6 +147,7 @@ def recomendar_v1(
     lpa: float | None = None,
     lpas_anuais: list[float] | None = None,
     vpa: float | None = None,
+    ipca_12m: float | None = None,
 ) -> str:
     """Exatamente o caminho dos insights (ValuationAnalyzer + RecommendationPolicy),
     alimentado com o snapshot do dia."""
@@ -155,7 +158,9 @@ def recomendar_v1(
         open_price=None, previous_close=None, day_high=None, day_low=None, volume=None, market_cap=None,
         fifty_two_week_low=amostra.minima_52s, fifty_two_week_high=amostra.maxima_52s,
     )
-    valuation = ValuationAnalyzer(limiares=limiares).analyze(snapshot, taxa_juros, "BACKTEST", lpas_anuais, vpa)
+    valuation = ValuationAnalyzer(limiares=limiares).analyze(
+        snapshot, taxa_juros, "BACKTEST", lpas_anuais, vpa, ipca_12m
+    )
     if not valuation["valido"]:
         return "SEM_DADOS"
     contexto = TechnicalContextAnalyzer().analyze(snapshot)
@@ -164,14 +169,22 @@ def recomendar_v1(
 
 def regra_v1_antiga(a: Amostra) -> str:
     """2026.09.26-1: sem juros (Y = 4,4), LPA do ultimo anual, venda com margem < 0."""
-    return recomendar_v1(a, Limiares(margem_venda=0.0), TAXA_REFERENCIA_GRAHAM, a.lpa_anual)
+    # Tudo fixado explicitamente: se dependesse dos padroes de Limiares, a
+    # regra "antiga" mudaria a cada calibracao (e sumiu quando o padrao virou
+    # G_NOMINAL, que exige IPCA).
+    return recomendar_v1(
+        a, Limiares(margem_venda=0.0, modo_juros="G_REAL", multiplo_base=8.5, margem_compra_forte=20.0,
+                    ey_compra_forte=12.0, margem_compra_moderada=20.0, ey_compra_moderada=8.0,
+                    posicao_alerta=90.0, margem_alerta=10.0, anos_lpa_min=99),
+        TAXA_REFERENCIA_GRAHAM, a.lpa_anual,
+    )
 
 
 def regra_v1_atual(a: Amostra, limiares: Limiares = LIMIARES_ATUAIS) -> str:
     """VERSAO_REGRA: Selic como Y (CDI anualizado quando nao ha historico da
     Selic no dia), LPA normalizado pelos anuais entregues, Graham Number."""
     taxa = a.selic if a.selic is not None else a.juros_cdi
-    return recomendar_v1(a, limiares, taxa, a.lpa_recente, a.lpas_anuais, a.vpa)
+    return recomendar_v1(a, limiares, taxa, a.lpa_recente, a.lpas_anuais, a.vpa, a.ipca_12m)
 
 
 def regra_v2(a: Amostra) -> str:
@@ -209,8 +222,8 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
         for d, v in db.execute(text("SELECT data, valor FROM indice_macro WHERE codigo_serie='CDI' AND valor IS NOT NULL"))
     }
     datas_cdi = sorted(cdi)
-    # provento_distribuido e do gestor-ativos-brutos (ClienteB3Proventos); so
-    # tem cobertura a partir de 27/09/2026 (limite da fonte, ver proventos.py).
+    # provento_distribuido e do gestor-ativos-brutos (ClienteB3Proventos);
+    # janela movel de ~12 meses anteriores a cada coleta (ver proventos.py).
     proventos_por_emissor = agrupar_por_emissor_e_data(
         db.execute(text("SELECT simbolo, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido")).all()
     )
@@ -350,8 +363,8 @@ class Backtest:
                 "(provável desdobramento) ficaram fora do placar"
             )
         observacoes.append(
-            "Retorno inclui proventos (data-com) só a partir de 27/09/2026 - fonte da B3 só "
-            "cobre os últimos ~12 meses por consulta; sinais anteriores não têm ajuste."
+            "Retorno inclui proventos (data-com) numa janela móvel de ~12 meses "
+            "anteriores a cada coleta da B3; sinais fora dessa janela não têm ajuste."
         )
         observacoes.append("Universo de hoje aplicado ao passado (viés de sobrevivência).")
 
@@ -383,7 +396,7 @@ class Backtest:
             "frequencia": "primeiro pregao de cada mes",
             "horizontes_pregoes": list(self._horizontes),
             "custo_ida_e_volta": str(CUSTO_IDA_E_VOLTA_PADRAO),
-            "fonte_preco": "B3 COTAHIST (bruto) + proventos de provento_distribuido (so a partir de 27/09/2026)",
+            "fonte_preco": "B3 COTAHIST (bruto) + proventos de provento_distribuido (janela movel de ~12 meses por coleta)",
             "fonte_lucro": "CVM pela DT_RECEB; v1 atual: min(LPA recente, media de 3-5 anuais)",
             "fonte_juros": "v1: Selic meta vigente (DEC-02); v2: CDI anualizado",
             "ativos": sorted({a.simbolo for a in amostras}),

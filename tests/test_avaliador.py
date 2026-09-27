@@ -173,7 +173,7 @@ def test_versao_da_regra_esta_fixada():
     Este teste existe para a mudanca de regra nao passar despercebida: sinais
     de regras diferentes nao podem cair no mesmo placar.
     """
-    assert VERSAO_REGRA == "2026.09.27-2"
+    assert VERSAO_REGRA == "2026.09.27-3"
 
 
 # --- proventos (Item 3, 27/09/2026) --------------------------------------
@@ -216,7 +216,7 @@ def test_regua_da_carteira_tambem_recebe_proventos():
     """Sem isso o sinal ganha provento e a regua nao - excesso fica viesado
     a favor de quem paga dividendo (achado da sessao paralela, 27/09)."""
     pregoes = serie(fechamentos=[10, 10, 10, 10], aberturas=[10, 10, 10, 10])
-    entrada, saida = pregoes[1].data, pregoes[3].data
+    entrada = pregoes[1].data
 
     tickers = ["ATVA3", "ATVB3", "ATVC3", "ATVD3", "ATVE3"]  # raizes distintas -> emissores distintos
     carteira = {t: serie(fechamentos=[10, 10, 10, 10]) for t in tickers}

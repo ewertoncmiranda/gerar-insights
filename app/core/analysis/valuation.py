@@ -11,6 +11,12 @@ TAXA_REFERENCIA_GRAHAM = 4.4
 # Piso de sanidade: com Y perto de zero o fator 4,4/Y explode.
 TAXA_MINIMA = 2.0
 
+# Modos de combinar juros e crescimento (limiares.modo_juros, TASK-54).
+MODO_G_REAL = "G_REAL"
+MODO_G_NOMINAL = "G_NOMINAL"
+MODO_Y_REAL = "Y_REAL"
+MODOS_JUROS = (MODO_G_REAL, MODO_G_NOMINAL, MODO_Y_REAL)
+
 
 class GrahamValuation:
     """V = LPA x (multiplo_base + 2g) x 4,4 / Y.
@@ -32,15 +38,29 @@ class GrahamValuation:
         self.multiplo_base = multiplo_base
 
     def calculate_scenarios(
-        self, earnings_per_share: float, price: float, taxa_juros: float = TAXA_REFERENCIA_GRAHAM
+        self,
+        earnings_per_share: float,
+        price: float,
+        taxa_juros: float = TAXA_REFERENCIA_GRAHAM,
+        ipca: float | None = None,
+        modo: str = MODO_G_REAL,
     ) -> dict:
-        fator = fator_de_juros(taxa_juros)
+        """modo G_NOMINAL soma o IPCA ao crescimento; Y_REAL desconta o IPCA
+        da taxa. Nominal com nominal, ou real com real: o G_REAL mistura os
+        dois e por isso a margem acompanhava a Selic (DEC-07)."""
+        if modo != MODO_G_REAL and ipca is None:
+            raise ValueError(f"modo {modo} precisa do IPCA 12m")
+        taxa = taxa_juros - ipca if modo == MODO_Y_REAL else taxa_juros
+        inflacao = ipca if modo == MODO_G_NOMINAL else 0.0
+        fator = fator_de_juros(taxa)
         scenarios = {}
-        for name, growth in self.SCENARIOS.items():
+        for name, real in self.SCENARIOS.items():
+            growth = real + inflacao
             implied_earnings_multiple = (self.multiplo_base + 2 * growth) * fator
             fair_price = earnings_per_share * implied_earnings_multiple
             scenarios[name] = {
-                "crescimento_percent": growth,
+                "crescimento_percent": round_metric(growth),
+                "taxa_usada_percent": round_metric(max(taxa, TAXA_MINIMA)),
                 "multiplo_lucro_implicito": round_metric(implied_earnings_multiple),
                 "preco_justo": round_metric(fair_price),
                 "margem_seguranca_percent": round_metric(percent(fair_price - price, fair_price)),
@@ -95,15 +115,21 @@ class ValuationAnalyzer:
         fonte_taxa: str = "INFORMADA",
         lpas_anuais: list[float] | None = None,
         vpa: float | None = None,
+        ipca_12m: float | None = None,
     ) -> dict:
         """taxa_juros: Y em % ao ano. Obrigatoria de proposito - cair para a
         formula sem juros quando a taxa falta misturaria duas regras sob a
         mesma versao. lpas_anuais (mais recente primeiro) e vpa vem da CVM,
         ja filtrados pela data de entrega."""
         lpa, fonte_lpa, media = normalizar_lpa(snapshot.earnings_per_share, lpas_anuais, self.limiares)
-        valido = lpa is not None and lpa > 0 and bool(snapshot.price)
+        modo = self.limiares.modo_juros
+        # Modo que usa IPCA sem IPCA disponivel: invalido, nunca cai em outro modo.
+        valido = (lpa is not None and lpa > 0 and bool(snapshot.price)
+                  and (modo == MODO_G_REAL or ipca_12m is not None))
         earnings_yield = percent(lpa, snapshot.price) if valido else None
-        scenarios = self.graham.calculate_scenarios(lpa, snapshot.price, taxa_juros) if valido else None
+        scenarios = (
+            self.graham.calculate_scenarios(lpa, snapshot.price, taxa_juros, ipca_12m, modo) if valido else None
+        )
         referencia = (
             GrahamValuation(self.limiares.multiplo_base).calculate_scenarios(
                 lpa, snapshot.price, TAXA_REFERENCIA_GRAHAM
@@ -125,6 +151,8 @@ class ValuationAnalyzer:
             "taxa_livre_risco_percent": round_metric(taxa_juros),
             "fonte_taxa_livre_risco": fonte_taxa,
             "fator_juros": round_metric(fator_de_juros(taxa_juros)),
+            "modo_juros": modo,
+            "ipca_12m_percent": round_metric(ipca_12m),
             # So referencia: a formula de 1962 sem o ajuste de juros.
             "cenarios_graham_sem_ajuste_juros": referencia,
             "lpa_atual": round_metric(snapshot.earnings_per_share),
