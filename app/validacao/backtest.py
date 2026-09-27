@@ -102,6 +102,10 @@ class Avaliacao:
     periodo: str
     recomendacao: str
     resultado: ResultadoHorizonte
+    # Houve provento com data-com dentro da janela (TASK-56). A B3 so devolve
+    # os ~12 meses anteriores a cada coleta (gerar-insights#TASK-46): nas
+    # janelas mais antigas sai False por falta de dado, nao de provento.
+    teve_provento: bool = False
 
 
 def montar_series(linhas, identidades: dict[str, tuple[str, bool]], universo: set[str]) -> dict[str, list[Vela]]:
@@ -286,7 +290,10 @@ def aplicar(amostras: list[Amostra], regras: dict[str, Callable[[Amostra], str]]
             sentido = direcao(recomendacao)
             for base in a.resultados.values():
                 resultado = replace(base, acerto=None if sentido == 0 else (base.retorno_liquido * sentido) > 0)
-                avaliacoes.append(Avaliacao(a.simbolo, versao, a.periodo, recomendacao, resultado))
+                avaliacoes.append(
+                    Avaliacao(a.simbolo, versao, a.periodo, recomendacao, resultado,
+                              teve_provento=resultado.proventos_periodo > 0)
+                )
     return avaliacoes
 
 
@@ -355,10 +362,11 @@ class Backtest:
                 text(
                     "INSERT INTO backtest_placar (execucao_id, versao_regra, periodo, recomendacao, horizonte, "
                     "avaliados, acertos, taxa_base, retorno_medio, excesso_medio_cdi, excesso_medio_carteira, "
-                    "n_excesso_cdi, desvio_excesso_cdi, n_excesso_carteira, desvio_excesso_carteira) "
+                    "n_excesso_cdi, desvio_excesso_cdi, n_excesso_carteira, desvio_excesso_carteira, "
+                    "janelas_com_provento) "
                     "VALUES (:e, :versao, :periodo, :recomendacao, :horizonte, :avaliados, :acertos, :taxa_base, "
                     ":retorno_medio, :excesso_cdi, :excesso_carteira, :n_excesso_cdi, :desvio_excesso_cdi, "
-                    ":n_excesso_carteira, :desvio_excesso_carteira)"
+                    ":n_excesso_carteira, :desvio_excesso_carteira, :janelas_com_provento)"
                 ),
                 {"e": execucao_id, **linha},
             )
@@ -418,12 +426,13 @@ def agregar(avaliacoes: list[Avaliacao]) -> list[dict]:
         janelas_unicas[a.periodo, r.horizonte][(a.simbolo, r.data_entrada)] = r.retorno_liquido > 0
     base_alta = {k: sum(v.values()) / len(v) for k, v in janelas_unicas.items() if v}
 
-    grupos: dict[tuple, list[ResultadoHorizonte]] = defaultdict(list)
+    grupos: dict[tuple, list[Avaliacao]] = defaultdict(list)
     for a in validas:
-        grupos[a.versao, a.periodo, a.recomendacao, a.resultado.horizonte].append(a.resultado)
+        grupos[a.versao, a.periodo, a.recomendacao, a.resultado.horizonte].append(a)
 
     linhas = []
-    for (versao, periodo, recomendacao, horizonte), resultados in sorted(grupos.items()):
+    for (versao, periodo, recomendacao, horizonte), avaliadas in sorted(grupos.items()):
+        resultados = [a.resultado for a in avaliadas]
         sentido = direcao(recomendacao)
         base = base_alta.get((periodo, horizonte))
         taxa_base = None if sentido == 0 or base is None else (base if sentido > 0 else 1 - base)
@@ -444,6 +453,8 @@ def agregar(avaliacoes: list[Avaliacao]) -> list[dict]:
             "desvio_excesso_cdi": _desvio([r.excesso_cdi for r in resultados]),
             "n_excesso_carteira": _contagem([r.excesso_carteira for r in resultados]),
             "desvio_excesso_carteira": _desvio([r.excesso_carteira for r in resultados]),
+            # Quantas janelas tiveram o retorno ajustado por provento (TASK-56).
+            "janelas_com_provento": sum(1 for a in avaliadas if a.teve_provento),
         })
     return linhas
 
