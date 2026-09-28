@@ -31,6 +31,7 @@ from app.core.analysis.recommendation import RecommendationPolicy
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
 from app.core.analysis.valuation import MODOS_JUROS, ValuationAnalyzer
 from app.validacao.avaliador import direcao
+from app.validacao.bootstrap import intervalo_separacao_em_blocos
 from app.validacao.backtest import CORTE_PADRAO, INICIO_PADRAO, Amostra, montar_amostras, regra_v1_antiga
 
 AMOSTRA_MINIMA = 60
@@ -142,6 +143,27 @@ def _r(valor):
     return None if valor is None else round(valor, 3)
 
 
+def ic_separacao(recomendacoes, amostras, periodo: str, horizonte: int) -> tuple[float, float] | None:
+    """IC 95% da separacao compra x venda por bootstrap em blocos de meses (TASK-37)."""
+    janelas = []
+    for rec, a in zip(recomendacoes, amostras):
+        if rec is None or rec == "SEM_DADOS" or a.periodo != periodo:
+            continue
+        r = a.resultados.get(horizonte)
+        if r is None or r.evento_suspeito or r.excesso_carteira is None:
+            continue
+        lado = direcao(rec)
+        if lado:
+            janelas.append((r.data_entrada, lado, float(r.excesso_carteira)))
+    ic = intervalo_separacao_em_blocos(janelas, horizonte)
+    return None if ic is None else (round(ic[0], 4), round(ic[1], 4))
+
+
+# Quantos candidatos (os melhores pela separacao pontual) passam pelo bootstrap,
+# que e caro; a escolha final e pelo limite inferior do IC (infra#TASK-37).
+FINALISTAS = 30
+
+
 def recomendar(valuations, limiares: Limiares) -> list[str | None]:
     politica = RecommendationPolicy(limiares)
     return [None if v is None else politica.define_recommendation(v[0], v[1]) for v in valuations]
@@ -170,7 +192,16 @@ def calibrar(amostras: list[Amostra], horizonte: int) -> dict:
     if not candidatos:
         raise RuntimeError("Nenhuma combinacao com amostra minima, venda <= 50% e estavel entre regimes")
     candidatos.sort(key=lambda c: c[0], reverse=True)
-    melhor_sep, melhor, medida_cal, estavel_cal = candidatos[0]
+    # TASK-37: entre os finalistas pela separacao pontual, vence o maior LIMITE
+    # INFERIOR do IC da separacao - robustez, nao o melhor numero de sorte.
+    finalistas = []
+    for sep, parametros, medida, estavel in candidatos[:FINALISTAS]:
+        lim = replace(LIMIARES_ATUAIS, **parametros)
+        recs = recomendar(valuations[lim.modo_juros, lim.multiplo_base], lim)
+        ic = ic_separacao(recs, amostras, "CALIBRACAO", horizonte)
+        finalistas.append((ic[0] if ic else float("-inf"), ic, sep, parametros, medida, estavel))
+    finalistas.sort(key=lambda f: f[0], reverse=True)
+    _, ic_cal, melhor_sep, melhor, medida_cal, estavel_cal = finalistas[0]
     melhor_limiares = replace(LIMIARES_ATUAIS, **melhor)
 
     atuais_val = valuations.get((LIMIARES_ATUAIS.modo_juros, LIMIARES_ATUAIS.multiplo_base)) or _valuations(
@@ -211,14 +242,20 @@ def calibrar(amostras: list[Amostra], horizonte: int) -> dict:
         "horizonte": horizonte,
         "combinacoes_validas": len(candidatos),
         "melhor": {"parametros": melhor, "calibracao": medida_cal, "estabilidade_calibracao": estavel_cal,
-                   "teste": medir(recs_melhor, amostras, "TESTE", horizonte)},
+                   "ic_separacao_calibracao": ic_cal,
+                   "teste": medir(recs_melhor, amostras, "TESTE", horizonte),
+                   "ic_separacao_teste": ic_separacao(recs_melhor, amostras, "TESTE", horizonte)},
+        "finalistas": [{"ic_inferior": f[0], "separacao": f[2], "parametros": f[3]} for f in finalistas[:5]],
         "por_modo": por_modo,
         "top5_calibracao": [{"separacao": c[0], "parametros": c[1]} for c in candidatos[:5]],
         "limiares_atuais": {"parametros": {c: getattr(LIMIARES_ATUAIS, c) for c in chaves},
                             "calibracao": medir(recs_atuais, amostras, "CALIBRACAO", horizonte),
                             "estabilidade_calibracao": estabilidade(recs_atuais, amostras, horizonte),
+                            "ic_separacao_calibracao": ic_separacao(recs_atuais, amostras, "CALIBRACAO", horizonte),
+                            "ic_separacao_teste": ic_separacao(recs_atuais, amostras, "TESTE", horizonte),
                             "teste": medir(recs_atuais, amostras, "TESTE", horizonte)},
-        "v1_antiga": {"calibracao": medir(antiga, amostras, "CALIBRACAO", horizonte),
+        "v1_antiga": {"ic_separacao_teste": ic_separacao(antiga, amostras, "TESTE", horizonte),
+                      "calibracao": medir(antiga, amostras, "CALIBRACAO", horizonte),
                       "teste": medir(antiga, amostras, "TESTE", horizonte)},
         "distribuicao_ultimo_mes": {"data": ultimo_mes.isoformat(), "v1_antiga": distribuicao(antiga),
                                     "limiares_atuais": distribuicao(recs_atuais),

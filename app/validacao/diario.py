@@ -143,7 +143,7 @@ class DiarioDeSinais:
             )
             dados = self._carregar_dados(db) if self._carregar_dados else None
             for simbolo in sorted(fechamentos):
-                insight = self._repo.ultimo_insight(db, simbolo, inicio, fim)
+                insight = self._repo.ultimo_insight(db, simbolo, inicio, fim, data_pregao=data_pregao)
                 if insight is None:
                     resumo.sem_insight.append(simbolo)
                     continue
@@ -229,6 +229,19 @@ class DiarioDeSinais:
         return resumo
 
 
+def _registrar_e_logar(diario: DiarioDeSinais, pregao: date, agora_utc: datetime, logger) -> None:
+    r = diario.registrar(pregao, agora_utc)
+    logger.info(
+        "Diario %s | registrados=%d %s | ja existiam=%d | sem insight=%d | sem versao de regra=%s",
+        r.data_pregao, len(r.registrados), r.registrados, len(r.ja_existiam),
+        len(r.sem_insight), r.sem_versao,
+    )
+    logger.info(
+        "Sombra v2 (%s) | registrados=%d %s | sem dados (LPA, juros)=%s",
+        VERSAO_REGRA_V2, len(r.sombra_v2), r.sombra_v2, r.sombra_v2_sem_dados,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Diario de sinais (paper trading)")
     parser.add_argument("comando", choices=["registrar", "avaliar"])
@@ -239,31 +252,34 @@ def main(argv: list[str] | None = None) -> int:
     from app.config.config_logger import setup_logger
     from app.config.database_config import ConfigDatabase
     from app.validacao.ponto_no_tempo import DadosPontoNoTempo
-    from app.validacao.repositorio_diario import RepositorioDiario
+    from app.validacao.repositorio_diario_oficial import RepositorioDiarioOficial
 
     logger = setup_logger()
+    # Preco oficial da B3 e insights diarios da camada Base (2026-09-27).
+    repositorio = RepositorioDiarioOficial()
     diario = DiarioDeSinais(
-        RepositorioDiario(), ConfigDatabase().session, logger, carregar_dados=DadosPontoNoTempo.carregar
+        repositorio, ConfigDatabase().session, logger, carregar_dados=DadosPontoNoTempo.carregar
     )
     agora_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if argumentos.comando == "registrar":
-        r = diario.registrar(argumentos.data, agora_utc)
-        logger.info(
-            "Diario %s | registrados=%d %s | ja existiam=%d | sem insight=%s | sem versao de regra=%s",
-            r.data_pregao, len(r.registrados), r.registrados, len(r.ja_existiam),
-            r.sem_insight, r.sem_versao,
-        )
-        logger.info(
-            "Sombra v2 (%s) | registrados=%d %s | sem dados (LPA, juros)=%s",
-            VERSAO_REGRA_V2, len(r.sombra_v2), r.sombra_v2, r.sombra_v2_sem_dados,
-        )
-    else:
-        r = diario.avaliar()
-        logger.info(
-            "Avaliacao do diario | resultados gravados=%d | sinais ainda pendentes=%d",
-            r.resultados_gravados, r.sinais_pendentes,
-        )
+        if argumentos.data is not None:
+            pregoes = [argumentos.data]
+        else:
+            # Sem --data: todo pregao do COTAHIST ainda sem sinal (recupera dias perdidos).
+            hoje_b3 = agora_utc.replace(tzinfo=timezone.utc).astimezone(FUSO_B3).date()
+            with ConfigDatabase().session() as db:
+                pregoes = repositorio.pregoes_a_registrar(db, hoje_b3)
+        for pregao in pregoes:
+            _registrar_e_logar(diario, pregao, agora_utc, logger)
+        if not pregoes:
+            logger.info("Diario: nenhum pregao novo no COTAHIST para registrar")
+        return 0
+    r = diario.avaliar()
+    logger.info(
+        "Avaliacao do diario | resultados gravados=%d | sinais ainda pendentes=%d",
+        r.resultados_gravados, r.sinais_pendentes,
+    )
     return 0
 
 

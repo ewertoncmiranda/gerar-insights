@@ -67,7 +67,7 @@ class _RepoFake:
         return {}
 
     # --- insights
-    def ultimo_insight(self, db, simbolo, ini, fim):
+    def ultimo_insight(self, db, simbolo, ini, fim, data_pregao=None):
         candidatos = [
             i for i in self.insights
             if i["simbolo"] == simbolo and ini <= i["quando_utc"] < fim and i["recomendacao"] != "SEM_DADOS"

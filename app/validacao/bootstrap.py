@@ -72,3 +72,36 @@ def intervalo_em_blocos(
         if n_excesso:
             medias.append(soma / n_excesso)
     return {"acerto": _percentis(taxas), "excesso": _percentis(medias), "meses": len(meses)}
+
+
+def intervalo_separacao_em_blocos(
+    janelas: Sequence[tuple[date, int, float]], horizonte: int
+) -> tuple[float, float] | None:
+    """IC de (excesso medio das compras - excesso medio das vendas), mesmo
+    bootstrap em blocos de meses. janelas: (data_entrada, lado +1/-1, excesso).
+    Criterio da recalibracao no universo amplo (infra#TASK-37): o limite
+    inferior deste intervalo, nao a separacao pontual."""
+    por_mes: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    for entrada, lado, excesso in janelas:
+        if lado in (1, -1):
+            por_mes[entrada.year * 12 + entrada.month].append((lado, excesso))
+    meses = sorted(por_mes)
+    if len(meses) < 2:
+        return None
+    bloco = max(1, min(len(meses), math.ceil(horizonte / PREGOES_POR_MES)))
+    blocos_por_reamostra = math.ceil(len(meses) / bloco)
+    inicios = range(len(meses) - bloco + 1)
+    gerador = random.Random(SEMENTE)
+    diferencas = []
+    for _ in range(REAMOSTRAS):
+        soma = {1: 0.0, -1: 0.0}
+        n = {1: 0, -1: 0}
+        for _ in range(blocos_por_reamostra):
+            inicio = gerador.choice(inicios)
+            for mes in meses[inicio : inicio + bloco]:
+                for lado, excesso in por_mes[mes]:
+                    soma[lado] += excesso
+                    n[lado] += 1
+        if n[1] and n[-1]:
+            diferencas.append(soma[1] / n[1] - soma[-1] / n[-1])
+    return _percentis(diferencas)
