@@ -7,17 +7,20 @@ insight - o resto (insercao, pendentes, CDI, proventos, resultados) e herdado:
     da BRAPI - backtest e diario medem com a mesma regua;
   - universo: a camada Base do pregao (universo liquido do ano mais os
     cadastrados), que e quem tem insight diario;
-  - insight: primeiro o da camada Base marcado com o PREGAO do preco
-    (data_pregao_referencia); so sem ele, o da janela de horario (insights
-    intradiarios dos favoritos). O COTAHIST chega com um dia de atraso, entao
+  - insight: SO o da camada Base marcado com o PREGAO do preco
+    (data_pregao_referencia). O COTAHIST chega com um dia de atraso, entao
     casar pela hora em que a analise rodou juntaria preco de um dia com sinal
-    de outro.
+    de outro. Ate 2026-09-29 havia fallback para o insight intradiario da
+    BRAPI na janela de horario; ele registrou AXIA3 no pregao 28/09 sem o
+    resto do universo (plano de atualizacao diaria, D2: sinal so com preco
+    oficial). Sem insight do COTAHIST, o ativo fica em sem_insight e o
+    insights_diarios --recuperar preenche o buraco.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import text
 
@@ -43,31 +46,47 @@ class RepositorioDiarioOficial(RepositorioDiario):
     def proximo_pregao(self, db, data_pregao: date) -> date | None:
         return self._cotahist.proximo_pregao(db, data_pregao)
 
-    def pregoes_a_registrar(self, db, ate: date, maximo: int = 10) -> list[date]:
+    def pregoes_a_registrar(self, db, ate: date, maximo: int = 10, revisitar: int = 5) -> list[date]:
         """Pregoes do COTAHIST ainda sem sinal: a rotina recupera dias perdidos
-        (maquina desligada, COTAHIST atrasado) sem --data manual."""
-        ultimo = db.execute(text("SELECT MAX(data_pregao) FROM sinal_diario")).scalar()
-        if ultimo is None:
+        (maquina desligada, COTAHIST atrasado) sem --data manual.
+
+        Revisita tambem os `revisitar` ultimos pregoes ja registrados: um dia
+        registrado pela metade (insights ainda nao gerados na hora) ficava
+        para sempre incompleto, porque so o MAX(data_pregao) era olhado.
+        registrar e idempotente, entao revisitar so completa o que falta.
+        """
+        base = db.execute(
+            text(
+                "SELECT MIN(data_pregao) FROM ("
+                "  SELECT DISTINCT data_pregao FROM sinal_diario "
+                "  ORDER BY data_pregao DESC LIMIT :n"
+                ") recentes"
+            ),
+            {"n": revisitar},
+        ).scalar()
+        if base is None:
             ultimo_pregao = self.ultimo_pregao_ate(db, ate)
             return [ultimo_pregao] if ultimo_pregao else []
-        return self._cotahist.pregoes_entre(db, ultimo, ate)[-maximo:]
+        # pregoes_entre exclui o limite inferior: um dia antes inclui a base.
+        return self._cotahist.pregoes_entre(db, base - timedelta(days=1), ate)[-maximo:]
 
     def ultimo_insight(self, db, simbolo: str, inicio_utc: datetime, fim_utc: datetime,
                        data_pregao: date | None = None):
-        if data_pregao is not None:
-            linha = db.execute(
-                text(
-                    "SELECT id, recomendacao, detalhes_json FROM insight_acao "
-                    "WHERE simbolo = :s AND recomendacao IS NOT NULL AND recomendacao <> 'SEM_DADOS' "
-                    "AND JSON_UNQUOTE(JSON_EXTRACT(detalhes_json, '$.data_pregao_referencia')) = :d "
-                    "ORDER BY id DESC LIMIT 1"
-                ),
-                {"s": simbolo, "d": data_pregao.isoformat()},
-            ).first()
-            if linha is not None:
-                detalhes = json.loads(linha[2]) if isinstance(linha[2], (str, bytes)) else linha[2]
-                return {"id": linha[0], "recomendacao": linha[1], "detalhes": detalhes or {}}
-        return super().ultimo_insight(db, simbolo, inicio_utc, fim_utc)
+        if data_pregao is None:
+            return super().ultimo_insight(db, simbolo, inicio_utc, fim_utc)
+        linha = db.execute(
+            text(
+                "SELECT id, recomendacao, detalhes_json FROM insight_acao "
+                "WHERE simbolo = :s AND recomendacao IS NOT NULL AND recomendacao <> 'SEM_DADOS' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(detalhes_json, '$.data_pregao_referencia')) = :d "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"s": simbolo, "d": data_pregao.isoformat()},
+        ).first()
+        if linha is None:
+            return None
+        detalhes = json.loads(linha[2]) if isinstance(linha[2], (str, bytes)) else linha[2]
+        return {"id": linha[0], "recomendacao": linha[1], "detalhes": detalhes or {}}
 
     def series_da_carteira(self, db, desde: date) -> dict[str, list[Pregao]]:
         """Series oficiais dos ativos que estiveram no universo desde `desde`:

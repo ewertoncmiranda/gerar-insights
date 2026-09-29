@@ -36,6 +36,22 @@ from app.validacao.universo import universo_por_ano
 # Janela de preco lida por execucao: cobre as 52 semanas e a serie tecnica.
 DIAS_DE_HISTORICO = 400
 
+# Recuperacao: teto de pregoes por execucao. Um mes de maquina desligada cabe;
+# acima disso e reprocessamento, e merece um --data explicito por dia.
+LIMITE_DE_RECUPERACAO = 30
+
+
+def ultimo_pregao_com_insight(db) -> date | None:
+    """Pregao mais recente que ja tem insight da camada Base (preco do COTAHIST)."""
+    valor = db.execute(
+        text(
+            "SELECT MAX(JSON_UNQUOTE(JSON_EXTRACT(detalhes_json, '$.data_pregao_referencia'))) "
+            "FROM insight_acao "
+            "WHERE JSON_UNQUOTE(JSON_EXTRACT(detalhes_json, '$.fonte_preco')) = 'B3_COTAHIST'"
+        )
+    ).scalar()
+    return date.fromisoformat(valor) if valor else None
+
 
 def universo_da_camada_base(db, repositorio: RepositorioCotahist, dia: date) -> set[str]:
     """Universo liquido do ano do pregao mais os ativos cadastrados (canonicos)."""
@@ -69,6 +85,7 @@ class InsightsDiariosService:
         analisador: FinancialAnalyzerService | None = None,
         carregar_dados: Callable = DadosPontoNoTempo.carregar,
         universo: Callable = universo_da_camada_base,
+        ultimo_com_insight: Callable = ultimo_pregao_com_insight,
     ):
         self._logger = logger
         self._cotahist = cotahist or RepositorioCotahist()
@@ -80,6 +97,34 @@ class InsightsDiariosService:
         )
         self._carregar_dados = carregar_dados
         self._universo = universo
+        self._ultimo_com_insight = ultimo_com_insight
+
+    def recuperar(
+        self, db, hoje: date | None = None, limite: int = LIMITE_DE_RECUPERACAO
+    ) -> list[ResumoInsightsDiarios]:
+        """Gera os insights de todo pregao do COTAHIST posterior ao ultimo insight.
+
+        Maquina desligada num dia util deixava o pregao sem insight para sempre
+        (sem --data, executar so olha o ultimo). Idempotente: sem pendencia,
+        devolve lista vazia; rodar de novo nao grava nada.
+        """
+        ultimo = self._cotahist.ultimo_pregao_ate(db, hoje or date.today())
+        if ultimo is None:
+            self._logger.warning("Sem COTAHIST no banco; nada a recuperar")
+            return []
+        referencia = self._ultimo_com_insight(db)
+        if referencia is None:
+            # Base vazia: so o ultimo pregao, em vez de gerar um ano inteiro.
+            return [self.executar(db, ultimo)]
+
+        pendentes = self._cotahist.pregoes_entre(db, referencia, ultimo)
+        if len(pendentes) > limite:
+            self._logger.warning(
+                "%d pregoes sem insight; recuperando so os %d mais recentes (%s a %s ficam de fora)",
+                len(pendentes), limite, pendentes[0], pendentes[-limite - 1],
+            )
+            pendentes = pendentes[-limite:]
+        return [self.executar(db, dia) for dia in pendentes]
 
     def executar(self, db, dia: date | None = None) -> ResumoInsightsDiarios:
         resumo = ResumoInsightsDiarios()
