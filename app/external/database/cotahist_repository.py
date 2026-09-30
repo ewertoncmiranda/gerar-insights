@@ -17,6 +17,9 @@ from decimal import Decimal
 
 from sqlalchemy import bindparam, text
 
+from app.fatores.ajuste_preco import ajustar
+from app.fatores.repositorio import RepositorioFatores
+
 PREGOES_52_SEMANAS = 252
 
 
@@ -68,7 +71,13 @@ class RepositorioCotahist:
 
     def series(self, db, simbolos: set[str], desde: date, ate: date | None = None) -> dict[str, list[PregaoOficial]]:
         """Serie diaria por codigo CANONICO, emendando os codigos antigos do
-        mesmo papel. Uma consulta so para todos os simbolos."""
+        mesmo papel, e ajustada por desdobramento/grupamento/bonificacao na
+        leitura (LAC-INS-2: evento_corporativo; sem a V16, serie bruta)."""
+        brutas = self._series_brutas(db, simbolos, desde, ate)
+        eventos = RepositorioFatores().eventos_corporativos(db)
+        return {s: ajustar(serie, eventos.get(s, [])) for s, serie in brutas.items()}
+
+    def _series_brutas(self, db, simbolos: set[str], desde: date, ate: date | None) -> dict[str, list[PregaoOficial]]:
         if not simbolos:
             return {}
         identidades = self.identidades(db)

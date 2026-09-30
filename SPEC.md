@@ -471,3 +471,89 @@ awslocal sqs send-message \
 ```
 
 Resultado esperado da mensagem de teste (regras atuais): cenário base `preco_justo = 29`, `margem ≈ 65,52%`, `EY = 20%`, MS conservador = 41,18% → `COMPRA_FORTE`.
+
+## Plano LAC: 9 lacunas de assertividade (proposta de 30-09-2026, EM AVALIAÇÃO)
+
+Plano completo, fontes e a migração única **V16** em `infra-b3-ecossytem/SPEC.md`, seção Plano LAC.
+
+**Por que.** Execução 14 do backtest, período de teste (2023 em diante): nenhuma recomendação direcional tem intervalo de 95% do acerto acima da taxa-base (ex.: COMPRA_FORTE em 126 pregões, 40,4% contra 51,4% de base; VENDA_VALUATION em 63 pregões, 52,8% com IC 43,9%–62,3%). Na calibração os números eram melhores: sinal de regra ajustada ao passado. Este serviço cobre **L1 e L2 no cálculo de retorno, L5, L6, L7, L8, L9 e o método de avaliação**.
+
+### LAC-INS-1: retorno total com proventos (L1)
+
+- `avaliador.py` soma hoje só os proventos de `provento_distribuido` (janela de ~12 meses): de 2017 a 2024 o retorno sai **sem dividendos**, o que penaliza pagadoras (bancos, elétricas) e favorece VENDA_VALUATION.
+- Passa a somar os proventos da DVA (`provento_contabil.por_acao`) na mesma regra do sinal e da régua (carteira):
+  - **Data:** a marca ex do COTAHIST (`cotacao_b3_diaria.marca_ex` em ED, EJ, EDJ…). O total do trimestre é repartido entre as datas ex daquele trimestre.
+  - **Sem marca:** vale a `data_entrega` do documento.
+  - Onde `provento_distribuido` existir (evento com valor e data-com), ele prevalece.
+- `janelas_com_provento` do placar passa a refletir as duas fontes.
+
+### LAC-INS-2: preço ajustado por desdobramento (L2)
+
+- `RepositorioCotahist.series` aplica `evento_corporativo.fator_preco` acumulado **na leitura**. O COTAHIST bruto não é regravado.
+- A regra que descarta janelas com salto acima de 40% continua, mas só para saltos **sem** evento correspondente. Medir quantas janelas voltam a contar (ex.: RCSL3, −76% em 10-03-2026 com marca EB, hoje descartada como "provável desdobramento").
+- Preços já chegam divididos pelo FATCOT (LAC-ETL-7): AZUL53 e GOLL54 deixam de entrar multiplicados por 1.000.000 e 1.000.
+
+### LAC-INS-3: fatores de preço (L5)
+
+Cálculo mensal (primeiro pregão do mês, só com pregões anteriores) em `fator_valor`: `MOMENTO_12_1`, `VOLATILIDADE_12M`, `LIQUIDEZ_63D`, `BETA_12M`, `DRAWDOWN_12M`, sobre o preço ajustado (LAC-INS-2). Comando: `python -m app.fatores calcular --desde AAAA-MM`.
+
+Dois fatores a mais, com os campos novos do COTAHIST (entram em `fator_definicao`, sem migração nova):
+- `SPREAD_MEDIANO_63D`: `(melhor oferta de venda − melhor oferta de compra) / preço médio`, mediana em 63 pregões; direção −1.
+- `DISTANCIA_VWAP`: fechamento sobre o preço médio do dia (`preco_medio`); direção 0, só para estudo.
+
+**Custo do backtest pelo spread real:** metade do spread mediano do ativo em cada ponta, com piso nos 0,10% atuais. O custo fixo subestima ações pouco líquidas (p90 do spread em 3,4%).
+
+### LAC-INS-4: fatores de qualidade e valor (L6)
+
+`ROIC`, `ALAVANCAGEM`, `MARGEM_BRUTA`, `ACCRUALS`, `PIOTROSKI`, `CRESCIMENTO_LPA`, `EARNINGS_YIELD`, `BOOK_TO_MARKET` e `DIVIDEND_YIELD`, lendo o `indicador_fundamentalista` **vigente na data** (o de maior `data_entrega` até a data de referência: `DadosPontoNoTempo`). Piotroski usa as 4 contas novas (LAC-ETL-5); sem elas, o escore fica `NULL`, sem valor parcial.
+
+### LAC-INS-5: comparação no setor (L7)
+
+- `percentil_setor` e `grupo_setor` em cada `fator_valor`, pelo `setor_grupo` (revisado em LAC-INFRA-2).
+- Regra de valuation por grupo (`setor_grupo.regra_valuation`): GRAHAM para a maioria; PL_SETOR ou PVP_SETOR para financeiro; DIVIDENDOS para utilidade pública. A regra atual passa a ser uma versão entre outras no placar, não a única.
+
+### LAC-INS-6: fatores de evento (L8)
+
+`FATOS_RELEVANTES_90D` e `AVISOS_PROVENTOS_180D`, contando `comunicado_cvm` por `data_entrega`, nunca por `data_referencia` (36 datas inválidas).
+
+### LAC-INS-7: fatores de referência próprios (L9)
+
+`fator_mercado_mensal`, construídos com COTAHIST e CVM no lugar do NEFIN:
+
+| Fator | Carteira |
+|---|---|
+| MKT | Média do universo menos CDI |
+| SMB | Menor menos maior valor de mercado |
+| HML | Maior menos menor book-to-market |
+| WML | Maior menos menor momento |
+| IML | Menor menos maior liquidez |
+| QMJ | Maior menos menor qualidade |
+
+Uso: regressão do retorno da carteira do sinal contra esses fatores. O alfa (intercepto) mostra se a regra traz algo além de fatores conhecidos.
+
+### LAC-INS-8: método de avaliação por ranking
+
+- **Ranking entre ações.** Todo mês, ordenar o universo pelo score de cada versão de regra e gravar:
+  - `backtest_ranking_mes`: correlação de Spearman entre o score e o retorno seguinte, por horizonte;
+  - `backtest_ranking_quintil`: retorno médio de cada quintil.
+- **Janelas sucessivas** (`esquema_validacao = 'JANELAS_SUCESSIVAS'`): treino expandindo desde 2011, teste de 12 meses, avançando ano a ano; cada janela registrada em `janela`.
+- **Registro de tentativas:**
+  - `backtest_execucao.hipotese` é preenchida **antes** de rodar: o que se espera e por quê;
+  - `numero_tentativa` conta as tentativas da mesma família;
+  - a melhor de N tentativas precisa superar um limiar corrigido por N.
+- **Juízes intocados:** o período de 2023 a 2026 já foi visto e não serve mais sozinho para promover regra. Valem as janelas sucessivas mais o diário ao vivo (primeiros horizontes vencem a partir do fim de outubro de 2026).
+- O método por classes (`backtest_placar`) continua, para comparação com o histórico.
+
+### LAC-INS-9: placar e promoção de regra
+
+Uma versão de regra só é promovida se, nas janelas de teste:
+1. o intervalo de 95% da correlação de ranking média ficar acima de zero;
+2. a diferença entre o quintil 5 e o 1 ficar positiva depois de custos (0,1% ida e volta);
+3. o alfa contra os fatores de referência (LAC-INS-7) não for negativo;
+4. o diário ao vivo não contradisser.
+
+### Aceite
+
+- Backtest de 2011 a 2026 com proventos e desdobramentos, nos dois métodos (classes e ranking).
+- Ao menos 3 versões novas medidas (valor, valor com qualidade, valor com momento), cada uma com `hipotese` e `numero_tentativa` registrados antes de rodar.
+- Testes para: soma de proventos da DVA sem dupla contagem com `provento_distribuido`; ajuste de preço por evento; fatores sem olhar o futuro (fator do mês M usa só dados até o pregão de referência); correlação de ranking e quintis em série sintética conhecida.

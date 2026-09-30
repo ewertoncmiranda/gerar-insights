@@ -29,10 +29,10 @@ isso, pagadora de dividendo parece sistematicamente pior do que e. So cobre
 os ~12 meses anteriores a cada coleta da B3 (ver app/validacao/proventos.py);
 sinais fora dessa janela ficam sem ajuste por ausencia de dado, nao por erro.
 
-O que NAO faz, de proposito: nao ajusta desdobramento/grupamento. Com preco
-bruto (COTAHIST), um desdobramento aparece como queda de 50% sem ninguem ter
-vendido; a janela que contem esse salto e marcada como suspeita e fica fora
-das estatisticas, em vez de virar um "erro" da regra.
+Desdobramento/grupamento: o avaliador nao ajusta; quem chama passa a serie
+ja ajustada (LAC-INS-2: evento_corporativo, na leitura). O salto que sobra -
+sem evento registrado - continua marcando a janela como suspeita, fora das
+estatisticas, em vez de virar um "erro" da regra.
 """
 
 from __future__ import annotations
@@ -115,6 +115,7 @@ def avaliar(
     proventos: dict[date, Decimal] | None = None,
     proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
     media_carteira_pronta: tuple[Decimal | None, int | None] | None = None,
+    custo_carteira: Decimal | None = None,
 ) -> ResultadoHorizonte | None:
     """Avalia um sinal num horizonte. None = ainda nao ha pregoes suficientes
     (sinal pendente) ou o dia do sinal nao esta na serie.
@@ -122,7 +123,10 @@ def avaliar(
     media_carteira_pronta: (media, ativos) ja calculada por media_da_carteira
     para esta mesma janela. O backtest do universo amplo (~400 ativos) a
     calcula uma vez por janela em vez de uma vez por sinal; sem ela, calcula
-    aqui a partir de `carteira`, como sempre."""
+    aqui a partir de `carteira`, como sempre.
+
+    custo_carteira: custo da regua quando o do sinal e o spread do proprio
+    papel (LAC-INS-3, backtest); None = o mesmo custo do sinal."""
     serie = sorted(pregoes, key=lambda p: p.data)
     indice_sinal = next((i for i, p in enumerate(serie) if p.data == data_sinal), None)
     if indice_sinal is None:
@@ -148,7 +152,8 @@ def avaliar(
         else _media_da_carteira(carteira, entrada.data, saida.data, proventos_carteira)
     )
     # Comprar a carteira inteira tambem paga custo: compara liquido com liquido.
-    retorno_carteira = media_carteira - custo_ida_e_volta if media_carteira is not None else None
+    custo_regua = custo_ida_e_volta if custo_carteira is None else custo_carteira
+    retorno_carteira = media_carteira - custo_regua if media_carteira is not None else None
     retorno_cdi = _cdi_acumulado(cdi_diario, entrada.data, saida.data)
 
     sentido = direcao(recomendacao)
@@ -178,6 +183,7 @@ def _media_da_carteira(
     data_entrada: date,
     data_saida: date,
     proventos_carteira: dict[str, dict[date, Decimal]] | None = None,
+    por_papel: bool = False,
 ) -> tuple[Decimal | None, int | None]:
     """Media simples do retorno bruto (com proventos) dos ativos da carteira
     no periodo.
@@ -201,7 +207,9 @@ def _media_da_carteira(
             continue
         if not janela[0].abertura or _tem_salto_suspeito(janela):
             continue
-        eventos = (proventos_carteira or {}).get(codigo_emissor(simbolo), {})
+        # por_papel: mapa ja por codigo (backtest, LAC-INS-1); senao, por emissor (diario).
+        chave = simbolo if por_papel else codigo_emissor(simbolo)
+        eventos = (proventos_carteira or {}).get(chave, {})
         soma = _proventos_no_periodo(eventos, data_entrada, data_saida)
         retornos.append((janela[-1].fechamento + soma) / janela[0].abertura - 1)
     if len(retornos) < MINIMO_ATIVOS_CARTEIRA:
@@ -253,3 +261,4 @@ def _q(valor: Decimal | None) -> Decimal | None:
 
 # Publico para quem calcula a regua uma vez por janela (backtest do universo amplo).
 media_da_carteira = _media_da_carteira
+tem_salto_suspeito = _tem_salto_suspeito
