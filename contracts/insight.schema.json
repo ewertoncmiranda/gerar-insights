@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "versao_payload",
+    "resumo"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2.1"
+    },
+    "versao_payload": {
+      "const": "2.1"
+    },
+    "resumo": {
+      "type": "object",
+      "required": [
+        "recomendacao"
+      ],
+      "properties": {
+        "recomendacao": {
+          "enum": [
+            "COMPRA_FORTE",
+            "COMPRA_MODERADA",
+            "VENDA_VALUATION",
+            "ALERTA_RISCO",
+            "MANTER",
+            "SEM_DADOS"
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

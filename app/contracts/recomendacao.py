@@ -1,0 +1,11 @@
+# Gerado por infra/scripts/sincronizar-contratos.mjs.
+from enum import StrEnum
+
+
+class Recomendacao(StrEnum):
+    COMPRA_FORTE = "COMPRA_FORTE"
+    COMPRA_MODERADA = "COMPRA_MODERADA"
+    VENDA_VALUATION = "VENDA_VALUATION"
+    ALERTA_RISCO = "ALERTA_RISCO"
+    MANTER = "MANTER"
+    SEM_DADOS = "SEM_DADOS"

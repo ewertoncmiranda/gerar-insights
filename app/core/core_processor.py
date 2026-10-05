@@ -12,6 +12,8 @@ from app.core.service.persistencia_service import PersistenciaHistoricoService
 from app.core.service.serie_historica_service import SerieHistoricaService
 from app.external.database.entity.insight_entity import InsightEntity
 from app.external.database.insight_repository import InsightRepository
+from app.core.event_contracts import preparar_evento, validar_insight
+from app.external.database.evento_repository import reservar_evento
 
 
 @dataclass
@@ -82,13 +84,12 @@ class CoreProcessor:
             for message in messages:
                 receipt_handle = message["ReceiptHandle"]
                 try:
-                    payload = json.loads(message["Body"])
-                    if nome_fila == "ativos" and not payload.get("dedupKey"):
-                        payload["dedupKey"] = self._chave_legada(payload)
+                    payload = preparar_evento(nome_fila, json.loads(message["Body"]))
 
                     with self.session_factory() as session:
                         try:
-                            handler(session, payload)
+                            if reservar_evento(session, nome_fila, payload["dedupKey"]):
+                                handler(session, payload)
                             session.commit()
                         except Exception as error:
                             session.rollback()
@@ -98,8 +99,7 @@ class CoreProcessor:
                     self.logger.info(f"Mensagem da fila {nome_fila} processada e deletada com sucesso")
 
                 except (json.JSONDecodeError, ValueError, TypeError) as bad_data_err:
-                    self.logger.error(f"Payload invalido na fila {nome_fila}. Descartando mensagem: {bad_data_err}")
-                    self.aws.get_sqs_client().delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+                    self.logger.error(f"Payload invalido na fila {nome_fila}. Mantendo para DLQ: {bad_data_err}")
 
                 except Exception as process_err:
                     self.logger.error(
@@ -128,6 +128,7 @@ class CoreProcessor:
         self.historico_service.registrar_snapshot(session, snapshot)
 
     def salvar_insight(self, session, insight_dict):
+        validar_insight(insight_dict["detalhes_json"])
         entidade: InsightEntity = InsightEntity(
             dedup_key=insight_dict["dedup_key"],
             simbolo=insight_dict["simbolo"],
