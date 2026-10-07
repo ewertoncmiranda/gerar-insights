@@ -48,11 +48,15 @@ def vigente(balancos: list[Balanco], referencia: date, tipo: str | None = None) 
 
 
 def anterior_ao(balancos: list[Balanco], atual: Balanco, referencia: date) -> Balanco | None:
-    """Mesmo tipo, periodo um ano antes, ja entregue ate a referencia."""
-    alvo = atual.periodo.replace(year=atual.periodo.year - 1)
+    """Mesmo tipo, periodo um ano antes, ja entregue ate a referencia.
+
+    Casa por ano e mes, nao pela data: exercicio que fecha em fevereiro
+    (CAML3) alterna 28 e 29/02, e `replace(year=...)` em 29/02 nem existe."""
     candidatos = [
         b for b in balancos
-        if b.tipo_periodo == atual.tipo_periodo and b.periodo == alvo and b.data_entrega <= referencia
+        if b.tipo_periodo == atual.tipo_periodo
+        and (b.periodo.year, b.periodo.month) == (atual.periodo.year - 1, atual.periodo.month)
+        and b.data_entrega <= referencia
     ]
     return max(candidatos, key=lambda b: b.data_entrega, default=None)
 

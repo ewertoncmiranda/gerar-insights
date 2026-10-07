@@ -38,3 +38,12 @@ terraform.tfstate.backup
 .terraform.lock.hcl
 .gitattributes
 
+
+# ISS-04: credenciais locais nunca no repositorio (os exemplos ficam versionados).
+env/.env.docker
+env/.env.local
+
+# Cobertura de testes
+.coverage
+coverage.xml
+htmlcov/

@@ -4,9 +4,33 @@ on:
   push:
     branches:
       - develop
+      - main
 
 jobs:
+  # ISS-05: imagem so e publicada se os testes unitarios passarem (sem lint
+  # nem piso de cobertura na esteira: decisao de 2026-10-07).
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests
+        env:
+          ENVIRONMENT: local
+          DB_HOST: localhost
+        run: pytest tests/ -v
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,8 +60,9 @@ jobs:
             type=sha,prefix={{branch}}-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=develop
-            type=raw,value=latest
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            # latest so a partir da main (TASK-05): develop nao sobrescreve a versao estavel.
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push to Docker Hub
         uses: docker/build-push-action@v5

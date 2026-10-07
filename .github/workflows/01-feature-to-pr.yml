@@ -15,12 +15,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.11'   # a mesma da imagem (Dockerfile)
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
-      - name: Run tests
+      # So testes unitarios na esteira (decisao de 2026-10-07): sem lint e
+      # sem piso de cobertura - nada alem de teste quebrado bloqueia o PR.
+      - name: Tests
         env:
           ENVIRONMENT: local
           DB_HOST: localhost
