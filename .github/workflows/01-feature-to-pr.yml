@@ -15,16 +15,20 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.11'   # a mesma da imagem (Dockerfile)
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
-      - name: Run tests
+      - name: Lint
+        run: ruff check app tests
+
+      # ISS-05/cobertura: piso de 45% (medido em 48% em 2026-10-07); so sobe.
+      - name: Run tests with coverage
         env:
           ENVIRONMENT: local
           DB_HOST: localhost
-        run: pytest tests/ -v
+        run: pytest tests/ -v --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=45
 
   create-pr:
     needs: test

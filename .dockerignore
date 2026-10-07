@@ -1,0 +1,43 @@
+# ISS-04: a imagem publica no Docker Hub leva so o codigo da aplicacao.
+# Configuracao chega por variavel de ambiente (docker-compose / Settings),
+# nunca por arquivo copiado para dentro da imagem.
+
+# Segredos e ambientes locais
+.env
+.env.*
+!.env.example
+env/
+*.pem
+*.key
+
+# Controle de versao, IDE e agentes
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+.agents
+.claude
+
+# Ambientes virtuais e caches
+.venv
+venv
+venv-local
+__pycache__
+**/__pycache__
+*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+
+# Nao vao para producao (contracts/ fica: event_contracts.py le os schemas)
+tests
+SPEC.md
+README.md
+Dockerfile
+.dockerignore
+requirements-dev.txt
