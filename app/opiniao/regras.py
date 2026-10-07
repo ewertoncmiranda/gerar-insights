@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-VERSAO_PROMPT = "1.1"
+VERSAO_PROMPT = "1.2"
 
 CURTO, MEDIO, LONGO = 21, 63, 126
 HORIZONTES: tuple[int, ...] = (CURTO, MEDIO, LONGO)

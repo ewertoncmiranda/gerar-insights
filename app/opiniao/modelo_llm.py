@@ -35,6 +35,7 @@ PALAVRAS_PROIBIDAS = ("garantido", "garantida", "certeza", "sem risco", "não te
 LIMITE_LEITURA = 200
 LIMITE_INVALIDA = 160
 MAXIMO_DE_EVIDENCIAS_NO_PEDIDO = 8
+MAXIMO_DE_JUSTIFICATIVAS = 5
 MINIMO_DE_PALAVRAS_INVALIDA = 3
 
 SCHEMA_DA_RESPOSTA = {
@@ -50,9 +51,8 @@ SCHEMA_DA_RESPOSTA = {
                 "required": ["evidencia_id", "leitura"],
             },
         },
-        "o_que_invalida": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["opiniao", "risco", "justificativa", "o_que_invalida"],
+    "required": ["opiniao", "risco", "justificativa"],
 }
 
 SISTEMA = (
@@ -62,12 +62,11 @@ SISTEMA = (
     "1. Use somente as evidências recebidas. Não use conhecimento próprio, notícias nem preços de memória.\n"
     "2. Escolha 'opiniao' somente entre as 'permitidas'. Na dúvida, prefira SINAL_NEUTRO ou SEM_BASE.\n"
     "3. Copie 'risco' exatamente como 'risco_calculado'.\n"
-    "4. Cada item de 'justificativa' cita um 'evidencia_id' recebido e explica, em UMA frase de até 20 "
-    "palavras, o que ele indica. Descreva o dado; não aconselhe nem diga se algo é bom para investir. "
-    "Não invente números: use só os que aparecem nas evidências.\n"
-    "5. 'o_que_invalida' lista até 3 frases curtas (mais de 3 palavras cada), escritas por você, sobre o "
-    "que tornaria a leitura errada. Não repita ids.\n"
-    "6. Nunca prometa resultado. Palavras como 'garantido', 'certeza' e 'sem risco' são proibidas."
+    "4. Use de 2 a 5 itens em 'justificativa', os que mais sustentam a 'opiniao'. Cada item cita um "
+    "'evidencia_id' recebido e explica, em UMA frase de até 20 palavras, o que ele indica. Descreva o "
+    "dado; não aconselhe nem diga se algo é bom para investir. Não invente números: use só os que "
+    "aparecem nas evidências.\n"
+    "5. Nunca prometa resultado. Palavras como 'garantido', 'certeza' e 'sem risco' são proibidas."
 )
 
 
@@ -90,6 +89,7 @@ def montar_pedido(simbolo: str, dossie: DossieDeHorizonte) -> str:
 
 
 _NUMERO = re.compile(r"\d+(?:[.,]\d+)?")
+_ID_TECNICO = re.compile(r"[a-z]+_[a-z0-9_]+")
 
 
 def _numeros(texto: str) -> set[str]:
@@ -102,7 +102,9 @@ def validar(resposta: object, dossie: DossieDeHorizonte) -> tuple[dict | None, l
     if not isinstance(resposta, dict):
         return None, ["resposta não é um objeto JSON"]
     opiniao, risco = resposta.get("opiniao"), resposta.get("risco")
-    justificativa, invalida = resposta.get("justificativa"), resposta.get("o_que_invalida")
+    # "O que invalida" nao vem do modelo: sai das evidencias contrarias (condicoes_contrarias).
+    # Se um modelo mandar o campo mesmo assim, ele e ignorado, mas tem de ser uma lista de textos.
+    justificativa, invalida = resposta.get("justificativa"), resposta.get("o_que_invalida") or []
 
     if opiniao not in OPINIOES:
         erros.append(f"opiniao inválida: {opiniao!r}")
@@ -147,6 +149,12 @@ def validar(resposta: object, dossie: DossieDeHorizonte) -> tuple[dict | None, l
     achadas = [p for p in PALAVRAS_PROIBIDAS if p in juntos]
     if achadas:
         erros.append(f"vocabulário proibido: {achadas}")
+    if len(justificativa) > MAXIMO_DE_JUSTIFICATIVAS:
+        erros.append(f"justificativa: no máximo {MAXIMO_DE_JUSTIFICATIVAS} itens")
+    # "O que invalida" e uma condicao futura, nao a repeticao de uma evidencia ou de um id.
+    nomes = [t.lower() for e in dossie.evidencias for t in (e.rotulo, e.id)]
+    if any(n in i.lower() for i in invalida for n in nomes) or any(_ID_TECNICO.search(i) for i in invalida):
+        erros.append("o_que_invalida repete uma evidência em vez de dar uma condição")
     if len(invalida) > 3 or any(len(i) > LIMITE_INVALIDA for i in invalida):
         erros.append("o_que_invalida: máximo 3 itens curtos")
     if any(len(i.split()) < MINIMO_DE_PALAVRAS_INVALIDA for i in invalida):
@@ -158,20 +166,35 @@ def validar(resposta: object, dossie: DossieDeHorizonte) -> tuple[dict | None, l
         "risco": risco,
         "justificativa": [{"evidencia_id": str(j["evidencia_id"]), "leitura": str(j["leitura"]).strip()}
                           for j in justificativa],
-        "o_que_invalida": [i.strip() for i in invalida],
+        "o_que_invalida": condicoes_contrarias(dossie, str(opiniao)),
     }, []
+
+
+def condicoes_contrarias(dossie: DossieDeHorizonte, opiniao: str) -> list[str]:
+    """"O que invalida" = as evidencias que apontam no sentido contrario da opiniao (ate 3), em texto."""
+    sentido = {POSITIVO: 1, NEGATIVO: -1}.get(opiniao)
+    if sentido is None:
+        return []
+    contra = [e for e in dossie.evidencias if e.direcao == -sentido]
+    return [f"Há evidência em sentido contrário: {e.rotulo.lower()} ({e.valor})." for e in contra[:3]]
 
 
 def resposta_de_regra(dossie: DossieDeHorizonte) -> dict:
     """Sem modelo (ou com resposta rejeitada): opiniao so pelas regras, texto montado dos numeros."""
     opiniao = dossie.permitidas[0]  # a ordem de `permitidas` ja vai da mais forte para a mais cautelosa
-    direcionais = sorted((e for e in dossie.evidencias if e.direcao != 0), key=lambda e: -abs(e.direcao))
-    justificativa = [{"evidencia_id": e.id, "leitura": f"{e.rotulo}: {e.valor}."} for e in direcionais[:4]]
-    if opiniao == SEM_BASE and dossie.motivo_sem_base:
-        justificativa = [{"evidencia_id": e.id, "leitura": f"{e.rotulo}: {e.valor}."}
-                         for e in dossie.evidencias[:2]]
+    sentido = {POSITIVO: 1, NEGATIVO: -1}.get(opiniao)
+    direcionais = [e for e in dossie.evidencias if e.direcao != 0]
+    if sentido is not None:
+        # A justificativa lista o que SUSTENTA a opiniao; o que a contraria vira "o que invalida".
+        a_favor = [e for e in direcionais if e.direcao == sentido]
+    else:
+        a_favor = direcionais
+    if not a_favor:
+        a_favor = dossie.evidencias[:2]
+    justificativa = [{"evidencia_id": e.id, "leitura": f"{e.rotulo}: {e.valor}."}
+                     for e in a_favor[:MAXIMO_DE_JUSTIFICATIVAS]]
     return {"opiniao": opiniao, "risco": dossie.risco, "justificativa": justificativa,
-            "o_que_invalida": []}
+            "o_que_invalida": condicoes_contrarias(dossie, opiniao)}
 
 
 class ProvedorLLM(Protocol):
