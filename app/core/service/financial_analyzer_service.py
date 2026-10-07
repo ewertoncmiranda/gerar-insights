@@ -95,7 +95,9 @@ class FinancialAnalyzerService:
             "margem_seguranca_percent": None,
             "recomendacao": "SEM_DADOS",
             "detalhes_json": {
-                "versao_payload": "2.0",
+                "schemaVersion": "2.1",
+                "versao_payload": "2.1",
+                "resumo": {"recomendacao": "SEM_DADOS"},
                 "aviso": aviso,
             },
         }

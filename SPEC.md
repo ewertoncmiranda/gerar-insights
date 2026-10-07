@@ -3,14 +3,16 @@
 | Campo | Valor |
 |---|---|
 | Versão da spec | 1.0.0 |
-| Data | 2026-09-25 |
-| Status | Ativa — baseline do estado atual + backlog planejado |
-| Branch analisada | `feature-migrate` (último commit `c432f9d`) |
-| Alterações não commitadas | feature de série histórica (ver `ISS-13`) |
+| Data | 2026-09-27 |
+| Status | IMPLEMENTADO |
 | Specs relacionadas | `infra-b3-ecossytem/SPEC.md` (ecossistema, Docker, contratos `CTR-` e problemas de integração `INT-`) · `gestor-ativos-brutos/SPEC.md` (produtor SQS e leitor de `insight_acao`) |
 | Público | Desenvolvedores humanos e agentes de IA (Codex, ChatGPT, Claude ou outros) |
 
 ---
+
+## Corte e estados comuns
+
+Data de corte: **2026-09-27** (America/Sao_Paulo). `PLANEJADO`: ainda não executado; `EM ANDAMENTO`: entrega parcial; `IMPLEMENTADO`: código ou decisão presente, sem confirmação integral nesta revisão; `VERIFICADO`: aceite demonstrado por verificação registrada; `BLOQUEADO`: dependência impeditiva identificada. Datas anteriores permanecem como histórico. Resolver um problema significa implementar sua correção; funcionalidades descontinuadas mantêm o ID e registram a resolução. Evidências antigas não são nova validação operacional.
 
 ## 1. Como usar este arquivo (protocolo para agentes)
 
@@ -21,15 +23,25 @@ Este é o **documento-fonte** do projeto, no modelo Spec Driven Development (SDD
 Regras:
 
 1. Antes de alterar código, leia as seções 2 a 7. Toda alteração deve estar ligada a um ID (`REQ-`, `NFR-`, `ISS-` ou `TASK-`).
-2. **IDs são estáveis.** Nunca renumere nem apague um ID; para descontinuar, mude o status para `DESCARTADO` com justificativa.
-3. Status válidos: `ABERTO`, `EM_ANDAMENTO`, `BLOQUEADO`, `CONCLUIDO`, `DESCARTADO` (tarefas/problemas) e `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO` (requisitos).
+2. **IDs são estáveis.** Nunca renumere nem apague um ID; para descontinuar, mude o status para `IMPLEMENTADO (descontinuado)` com justificativa.
+Estados válidos de requisitos, tarefas, problemas e decisões: `PLANEJADO`, `EM ANDAMENTO`, `IMPLEMENTADO`, `VERIFICADO`, `BLOQUEADO`. Descontinuação é uma resolução descrita, não um estado adicional.
 4. Ao concluir uma `TASK-`, atualize o status, registre a data e cite o commit/PR na coluna "Notas".
 5. Decisões de design ou de negócio viram uma entrada `DEC-` (seção 9). Não tome decisões marcadas como abertas sem registrar a escolha.
-6. Não invente requisitos: se algo não está aqui, proponha um novo item (`REQ-`/`TASK-`) com status `PLANEJADO`/`ABERTO` em vez de implementá-lo direto.
+6. Não invente requisitos: se algo não está aqui, proponha um novo item (`REQ-`/`TASK-`) com status `PLANEJADO`/`PLANEJADO` em vez de implementá-lo direto.
 7. Critérios de aceite usam o formato **Dado / Quando / Então** e devem virar testes automatizados sempre que possível.
 8. Mudanças em regras financeiras (seção 5) exigem incrementar `versao_payload` e atualizar esta spec no mesmo PR.
 
 ---
+
+## 1A. Coordenação entre agentes (estado em 2026-10-04)
+
+**Hub:** `infra-b3-ecossytem/SPEC.md` seção 1A — fila única, contratos, handoff e diário. Leia antes de codar; atualize lá ao pegar e ao fechar tarefa. Em conflito com seções antigas abaixo, vale o hub e esta seção.
+
+- **Dono neste repo:** worker (consome SQS, grava `insight_acao`), CLIs `app.insights_diarios` (`--recuperar`), `app.validacao.diario`, `app.validacao.backtest`, fatores/eventos do Plano LAC (LAC-INS-1..9).
+- **Mensageria hoje:** valida JSON Schema antes da transação; inbox `evento_processado` (V14); ACK só após commit; payload inválido é **mantido para a DLQ** (§3.4 antiga que diz descartar está obsoleta). Contrato de `insight.schema.json` vem de `infra/contracts` (sincronizado por script).
+- **Conclusão de pesquisa:** backtest sem vantagem distinguível (DEC-07/08/09). Nada aqui promove regra a "recomendada" sem os critérios de LAC-INS-9; manter aviso de regra experimental.
+- **Fila local:** LAC-INS-1..9 `IMPLEMENTADO` (8e9e159) — falta validar com dados reais após backfill (LAC-INFRA-3) e criar a rotina mensal (LAC-INFRA-4). TASK-45 (agendar `--recuperar`) está feita pela rotina da manhã da infra.
+- **Arquivos não commitados de outra sessão (contratos/inbox):** `app/contracts/`, `app/core/event_contracts.py`, `app/external/database/evento_repository.py`, `insight_payload.py`, `core_processor.py`, `financial_analyzer_service.py`, `requirements.txt` — não editar nem commitar sem o dono.
 
 ## 2. Visão do produto (funcional)
 
@@ -278,10 +290,10 @@ Avaliada na ordem abaixo; vale a primeira regra verdadeira:
 | REQ-03 | Calcular valuation Graham em 3 cenários e gravar o cenário base em `insight_acao` | IMPLEMENTADO |
 | REQ-04 | Gerar recomendação, risco, confiança, insights e fatores de decisão conforme a seção 5 | IMPLEMENTADO |
 | REQ-05 | Retornar `SEM_DADOS` quando os fundamentos forem inválidos | IMPLEMENTADO |
-| REQ-06 | Fazer upsert idempotente de candles diários em `serie_historica` | IMPLEMENTADO (não commitado) |
-| REQ-07 | Usar a série histórica (MM20, z-score, volume relativo) na recomendação | PARCIAL: calculado e gravado como sinal técnico (`TASK-30`, `TASK-31`); combinação com a recomendação depende de medição |
-| REQ-08 | Ajustar o valuation pela taxa livre de risco brasileira | PLANEJADO (`TASK-20`) |
-| REQ-09 | Incluir aviso (disclaimer) de caráter não-recomendatório no payload | PLANEJADO (`TASK-23`) |
+| REQ-06 | Fazer upsert idempotente de candles diários em `serie_historica` | IMPLEMENTADO (registrado no código) |
+| REQ-07 | Usar a série histórica (MM20, z-score, volume relativo) na recomendação | EM ANDAMENTO: calculado e gravado como sinal técnico (`TASK-30`, `TASK-31`); combinação com a recomendação depende de medição |
+| REQ-08 | Ajustar o valuation pela taxa livre de risco brasileira | IMPLEMENTADO — Selic vigente, crescimento nominal, `DEC-08` |
+| REQ-09 | Incluir aviso de caráter não-recomendatório no payload | IMPLEMENTADO — `InsightPayloadBuilder`; rótulos ainda dependem de `DEC-05` |
 
 Critérios de aceite de referência (devem virar testes):
 
@@ -293,14 +305,14 @@ Critérios de aceite de referência (devem virar testes):
 
 | ID | Requisito | Status |
 |---|---|---|
-| NFR-01 | **Atomicidade:** todas as escritas de uma mensagem ficam em uma única transação | ATENDIDO (2026-09-26) |
-| NFR-02 | **Idempotência:** reprocessar a mesma mensagem não gera duplicatas | ATENDIDO por `dedup_key` e índices únicos (2026-09-26) |
-| NFR-03 | **Resiliência:** mensagens que falham repetidamente vão para uma DLQ após N tentativas | ATENDIDO na infraestrutura (2026-09-26) |
-| NFR-04 | **Observabilidade:** logs estruturados em JSON, nível configurável, sem duplicação | NÃO ATENDIDO (`ISS-08`) |
-| NFR-05 | **Segurança:** nenhum segredo ou ambiente virtual dentro da imagem; container sem root | NÃO ATENDIDO (`ISS-04`) |
-| NFR-06 | **Testabilidade:** `app/core/analysis` com cobertura ≥ 90%; suíte verde no CI | PARCIAL — suíte verde (`ISS-03` concluído), `valuation`/`recommendation`/`technical_series` testados; % de cobertura não medido; CI ainda não roda pytest (`ISS-05`) |
-| NFR-07 | **Configuração:** toda configuração vem de `Settings` (fonte única) | PARCIAL (`ISS-10`) |
-| NFR-08 | **Pureza do domínio:** `app/core/analysis` sem I/O, determinístico | ATENDIDO |
+| NFR-01 | **Atomicidade:** todas as escritas de uma mensagem ficam em uma única transação | IMPLEMENTADO (2026-09-26) |
+| NFR-02 | **Idempotência:** reprocessar a mesma mensagem não gera duplicatas | IMPLEMENTADO por `dedup_key` e índices únicos (2026-09-26) |
+| NFR-03 | **Resiliência:** mensagens que falham repetidamente vão para uma DLQ após N tentativas | IMPLEMENTADO na infraestrutura (2026-09-26) |
+| NFR-04 | **Observabilidade:** logs estruturados em JSON, nível configurável, sem duplicação | PLANEJADO (`ISS-08`) |
+| NFR-05 | **Segurança:** nenhum segredo ou ambiente virtual dentro da imagem; container sem root | PLANEJADO (`ISS-04`) |
+| NFR-06 | **Testabilidade:** `app/core/analysis` com cobertura ≥ 90%; suíte verde no CI | EM ANDAMENTO — suíte verde (`ISS-03` concluído), `valuation`/`recommendation`/`technical_series` testados; % de cobertura não medido; CI ainda não roda pytest (`ISS-05`) |
+| NFR-07 | **Configuração:** toda configuração vem de `Settings` (fonte única) | EM ANDAMENTO (`ISS-10`) |
+| NFR-08 | **Pureza do domínio:** `app/core/analysis` sem I/O, determinístico | IMPLEMENTADO |
 
 ---
 
@@ -312,32 +324,32 @@ Severidade: **Crítico** (perda/corrupção de dados ou segurança), **Alto**, *
 
 | ID | Sev. | Problema | Evidência | Impacto | Correção sugerida | Status |
 |---|---|---|---|---|---|---|
-| ISS-01 | Crítico | Repositórios faziam `commit()` interno, anulando a transação do processor | Repositórios agora usam `flush`; `CoreProcessor` é o único dono do commit | Evita persistência parcial | Coberto por teste da unidade de trabalho | CONCLUIDO (2026-09-26) |
-| ISS-02 | Alto | Fila de ativos sem idempotência (SQS entrega *at-least-once*) | `dedup_key` propagada pelo produtor ou calculada de forma determinística no consumidor | Evita duplicatas em reentrega | Índices únicos + consulta idempotente | CONCLUIDO (2026-09-26) |
-| ISS-03 | Alto | ~~Suíte de testes quebrada e sem cobertura do domínio atual~~ | Testes legados (`test_trading_service.py` etc.) já removidos; `pytest tests -q` roda limpo | ~~Falha na coleta do pytest~~ | `app/core/analysis/valuation.py` e `recommendation.py` ganharam teste (`tests/test_valuation.py`, `tests/test_recommendation.py`, 2026-09-27) — `historical_series`/`technical_series` já tinham (`test_technical_series_analyzer.py`). Cobertura de `%` não medida (falta rodar `pytest --cov`) | CONCLUIDO (2026-09-27, verificado ao vivo: `pytest tests/ -q` → 74 passed) |
-| ISS-04 | Crítico | Sem `.dockerignore`; `COPY . .` leva `.env.local`, `.venv`, `venv-local`, `.git`, `.idea` para a imagem pública; roda como root | `Dockerfile:5` | Vazamento de credenciais no Docker Hub; imagem grande | `.dockerignore`, build multi-stage, `USER` não-root | ABERTO |
-| ISS-05 | Alto | CI publica a imagem (inclusive `latest`) sem rodar testes/lint | `.github/workflows/02-docker-build-push.yml:40,46` | Imagem quebrada em produção | Job `test` (pytest + ruff) como pré-requisito; `latest` só a partir de `main`/tag | ABERTO |
-| ISS-06 | Alto | Erros não-de-dados causam retry infinito; sem DLQ | `app/core/core_processor.py:103` | Mensagem venenosa consome recursos para sempre e polui logs | Redrive policy com DLQ (`maxReceiveCount`), ou checar `ApproximateReceiveCount` | ABERTO |
-| ISS-07 | Alto | Worker não cria nem migra o schema | não há `create_all`/Alembic no projeto. Hoje o schema vem de `infra-b3-ecossytem/mysql-init/1 - schema.sql` (só roda com volume vazio) e o Hibernate do gestor (`ddl-auto=update`) também mexe em `insight_acao` | Em ambientes com volume antigo, `serie_historica` não existe → mensagens da fila de série em retry infinito | Ver `infra#INT-04`, `infra#ISS-03`, `infra#DEC-01`; adotar Alembic se este serviço for o dono | ABERTO |
-| ISS-14 | Médio | Sem endpoint de métricas/saúde, embora o compose exponha a porta 8080 e o Prometheus faça scrape nela; logs só em stdout (fora do ELK) | `infra-b3-ecossytem/docker-compose.yml`, `prometheus.yml` | Worker invisível na observabilidade | `prometheus_client` em :8080 (mensagens processadas/descartadas, latência, recomendações por tipo) + logs JSON (ver `infra#INT-06`) | ABERTO |
-| ISS-08 | Médio | Logger duplica handlers a cada chamada; `LOG_LEVEL` ignorado; JSON logger não usado | `app/config/config_logger.py:5,9`; chamado em `main.py:7` e `repository_history.py:5` | Linhas de log duplicadas; sem controle de nível | Configuração única e idempotente, `python-json-logger`, nível vindo de `Settings` | ABERTO |
-| ISS-09 | Médio | Novo cliente boto3 criado a cada chamada SQS | `app/config/aws_config.py:17` | Overhead de CPU/conexões | Criar o cliente uma vez e reutilizá-lo | ABERTO |
-| ISS-10 | Médio | Retry do banco lê o env direto, duplicando `Settings` | `app/config/database_config.py:12-13` | Duas fontes de verdade | Usar `Settings().retry_attempts/retry_delay` | ABERTO |
-| ISS-11 | Baixo | Código morto/inconsistente: `@dataclass` com `__init__` manual; `datetime.utcnow` (deprecado); exceções em `app/exceptions` não usadas; pydantic e requests declarados sem uso. DynamoDB já removido (ver DEC-04) | `app/external/database/insight_repository.py:7`, entidades, `requirements.txt` | Ruído, confusão para novos devs/agentes | Limpeza; usar `datetime.now(timezone.utc)` | ABERTO |
-| ISS-12 | Baixo | README com texto residual de chatbot e informação incorreta (diz que as estratégias rodam) | `README.md:50,149` | Documentação enganosa | Reescrever o README apontando para esta spec | ABERTO |
-| ISS-13 | Médio | Feature de série histórica não commitada (4 arquivos novos, 4 modificados) | `git status` | Risco de perda de trabalho | Commitar em branch `feature/*` com testes | ABERTO |
+| ISS-01 | Crítico | Repositórios faziam `commit()` interno, anulando a transação do processor | Repositórios agora usam `flush`; `CoreProcessor` é o único dono do commit | Evita persistência parcial | Coberto por teste da unidade de trabalho | IMPLEMENTADO (2026-09-26) |
+| ISS-02 | Alto | Fila de ativos sem idempotência (SQS entrega *at-least-once*) | `dedup_key` propagada pelo produtor ou calculada de forma determinística no consumidor | Evita duplicatas em reentrega | Índices únicos + consulta idempotente | IMPLEMENTADO (2026-09-26) |
+| ISS-03 | Alto | ~~Suíte de testes quebrada e sem cobertura do domínio atual~~ | Testes legados (`test_trading_service.py` etc.) já removidos; `pytest tests -q` roda limpo | ~~Falha na coleta do pytest~~ | `app/core/analysis/valuation.py` e `recommendation.py` ganharam teste (`tests/test_valuation.py`, `tests/test_recommendation.py`, 2026-09-27) — `historical_series`/`technical_series` já tinham (`test_technical_series_analyzer.py`). Cobertura de `%` não medida (falta rodar `pytest --cov`) | IMPLEMENTADO (2026-09-27, verificado ao vivo: `pytest tests/ -q` → 74 passed) |
+| ISS-04 | Crítico | Sem `.dockerignore`; `COPY . .` leva `.env.local`, `.venv`, `venv-local`, `.git`, `.idea` para a imagem pública; roda como root | `Dockerfile:5` | Vazamento de credenciais no Docker Hub; imagem grande | `.dockerignore`, build multi-stage, `USER` não-root | PLANEJADO |
+| ISS-05 | Alto | CI publica a imagem (inclusive `latest`) sem rodar testes/lint | `.github/workflows/02-docker-build-push.yml:40,46` | Imagem quebrada em produção | Job `test` (pytest + ruff) como pré-requisito; `latest` só a partir de `main`/tag | PLANEJADO |
+| ISS-06 | Alto | Erros não-de-dados causam retry infinito; sem DLQ | `app/core/core_processor.py:103` | Mensagem venenosa consome recursos para sempre e polui logs | Redrive policy com DLQ (`maxReceiveCount`), ou checar `ApproximateReceiveCount` | PLANEJADO |
+| ISS-07 | Alto | Worker não cria nem migra o schema | não há `create_all`/Alembic no projeto. Hoje o schema vem de `infra-b3-ecossytem/mysql-migrations/V1__baseline.sql` (só roda com volume vazio) e o Hibernate do gestor (`ddl-auto=update`) também mexe em `insight_acao` | Em ambientes com volume antigo, `serie_historica` não existe → mensagens da fila de série em retry infinito | Ver `infra#INT-04`, `infra#ISS-03`, `infra#DEC-01`; adotar Alembic se este serviço for o dono | PLANEJADO |
+| ISS-14 | Médio | Sem endpoint de métricas/saúde, embora o compose exponha a porta 8080 e o Prometheus faça scrape nela; logs só em stdout (fora do ELK) | `infra-b3-ecossytem/docker-compose.yml`, `prometheus.yml` | Worker invisível na observabilidade | `prometheus_client` em :8080 (mensagens processadas/descartadas, latência, recomendações por tipo) + logs JSON (ver `infra#INT-06`) | PLANEJADO |
+| ISS-08 | Médio | Logger duplica handlers a cada chamada; `LOG_LEVEL` ignorado; JSON logger não usado | `app/config/config_logger.py:5,9`; chamado em `main.py:7` e `repository_history.py:5` | Linhas de log duplicadas; sem controle de nível | Configuração única e idempotente, `python-json-logger`, nível vindo de `Settings` | PLANEJADO |
+| ISS-09 | Médio | Novo cliente boto3 criado a cada chamada SQS | `app/config/aws_config.py:17` | Overhead de CPU/conexões | Criar o cliente uma vez e reutilizá-lo | PLANEJADO |
+| ISS-10 | Médio | Retry do banco lê o env direto, duplicando `Settings` | `app/config/database_config.py:12-13` | Duas fontes de verdade | Usar `Settings().retry_attempts/retry_delay` | PLANEJADO |
+| ISS-11 | Baixo | Código morto/inconsistente: `@dataclass` com `__init__` manual; `datetime.utcnow` (deprecado); exceções em `app/exceptions` não usadas; pydantic e requests declarados sem uso. DynamoDB já removido (ver DEC-04) | `app/external/database/insight_repository.py:7`, entidades, `requirements.txt` | Ruído, confusão para novos devs/agentes | Limpeza; usar `datetime.now(timezone.utc)` | PLANEJADO |
+| ISS-12 | Baixo | README com texto residual de chatbot e informação incorreta (diz que as estratégias rodam) | `README.md:50,149` | Documentação enganosa | Reescrever o README apontando para esta spec | PLANEJADO |
+| ISS-13 | Médio | Feature de série histórica não commitada (4 arquivos novos, 4 modificados) | `git status` | Risco de perda de trabalho | Commitar em branch `feature/*` com testes | PLANEJADO |
 
 ### 7.2 Financeiros (visão de analista)
 
 | ID | Sev. | Problema | Impacto | Correção sugerida | Status |
 |---|---|---|---|---|---|
-| ISS-F1 | Alto | ~~Graham sem ajuste de juros~~ | `app/core/analysis/valuation.py` (`GrahamValuation`, `fator_de_juros`) | ~~Viés estrutural para `COMPRA_*`~~ | `Y` = Selic meta vigente (`indice_macro`, ver `DEC-02`); cenário sem ajuste preservado só como referência em `cenarios_graham_sem_ajuste_juros`, fora da recomendação. Testado em `tests/test_valuation.py` | CONCLUIDO (2026-09-27) |
-| ISS-F2 | Alto | ~~LPA dos últimos 12 meses sem normalização~~ | `app/core/analysis/valuation.py` (`normalizar_lpa`, `graham_number`) | ~~Cíclica no pico do lucro saía `COMPRA_FORTE`~~ | LPA = mínimo entre o atual e a média de 3–5 anos entregues à CVM; Graham Number como segunda trava de `COMPRA_FORTE` (rebaixa para `COMPRA_MODERADA` se o preço passa do número). Testado em `tests/test_valuation.py` | CONCLUIDO (2026-09-27) |
-| ISS-F3 | Médio | ~~`VENDA_VALUATION` sempre que MS base < 0~~ | `app/core/analysis/limiares.py` (`margem_venda`), `app/core/analysis/recommendation.py` | ~~Quase toda empresa de crescimento virava "venda"~~ | Faixa neutra: `margem_venda` (−15% na primeira versão; −100% após a calibração, `DEC-07`) < MS base < 0 → `MANTER`; só abaixo de −15% é `VENDA_VALUATION`. Múltiplo-base (`multiplo_base`, 8,5) já é parâmetro em `Limiares`, não constante. Testado em `tests/test_recommendation.py` | CONCLUIDO (2026-09-27) |
-| ISS-F4 | Médio | Limiares (20%, 12%, 85/90) e score de confiança são heurísticos, sem backtest ou calibração; sem noção de setor | Confiança sem significado estatístico | Backtest (`TASK-40`); limiares configuráveis e versionados | PARCIAL: limiares versionados em `limiares.py` e calibrados por backtest (`TASK-41`, `DEC-07`); score de confiança e setor seguem heurísticos |
-| ISS-F5 | Médio | A recomendação principal (valuation) usa um único snapshot; a série histórica entra só como sinal técnico separado | Momentum e reversão à média já são calculados sobre a série (≥ 20 candles) e gravados no insight e no diário, mas não pesam na recomendação; o acerto deles ainda não foi medido | Medir os sinais técnicos no diário/backtest antes de combiná-los à recomendação | PARCIAL (TASK-30, TASK-31 concluídas) |
-| ISS-F6 | Médio | Rótulos "COMPRA/VENDA" podem configurar recomendação de investimento (atividade regulada pela CVM, Res. 20/2021) | Risco regulatório/reputacional se exposto a usuários finais | Rotular como "sinal quantitativo", incluir disclaimer no payload, revisar com jurídico | ABERTO |
-| ISS-F7 | Alto | ~~Retorno do backtest/diário usa preço bruto (COTAHIST), sem proventos~~ | `app/validacao/avaliador.py` (`avaliar`, `_proventos_no_periodo`), `app/validacao/proventos.py` | ~~Pagadora de dividendo parecia sistematicamente pior do que era~~ | Retorno passa a somar proventos com data-com na janela [entrada, saída) do sinal, lidos de `provento_distribuido` (gestor-ativos-brutos, endpoint da B3). Fonte devolve janela móvel de ~12 meses anteriores a cada coleta (não um corte fixo); sinais fora dessa janela ficam sem ajuste. Testado em `tests/test_avaliador.py` (`test_provento_na_janela_soma_ao_retorno` e correlatos) | CONCLUIDO (2026-09-27), cobertura PARCIAL (ver TASK-46) |
+| ISS-F1 | Alto | ~~Graham sem ajuste de juros~~ | `app/core/analysis/valuation.py` (`GrahamValuation`, `fator_de_juros`) | ~~Viés estrutural para `COMPRA_*`~~ | `Y` = Selic meta vigente (`indice_macro`, ver `DEC-02`); cenário sem ajuste preservado só como referência em `cenarios_graham_sem_ajuste_juros`, fora da recomendação. Testado em `tests/test_valuation.py` | IMPLEMENTADO (2026-09-27) |
+| ISS-F2 | Alto | ~~LPA dos últimos 12 meses sem normalização~~ | `app/core/analysis/valuation.py` (`normalizar_lpa`, `graham_number`) | ~~Cíclica no pico do lucro saía `COMPRA_FORTE`~~ | LPA = mínimo entre o atual e a média de 3–5 anos entregues à CVM; Graham Number como segunda trava de `COMPRA_FORTE` (rebaixa para `COMPRA_MODERADA` se o preço passa do número). Testado em `tests/test_valuation.py` | IMPLEMENTADO (2026-09-27) |
+| ISS-F3 | Médio | ~~`VENDA_VALUATION` sempre que MS base < 0~~ | `app/core/analysis/limiares.py` (`margem_venda`), `app/core/analysis/recommendation.py` | ~~Quase toda empresa de crescimento virava "venda"~~ | Faixa neutra: `margem_venda` (−15% na primeira versão; −100% após a calibração, `DEC-07`) < MS base < 0 → `MANTER`; só abaixo de −15% é `VENDA_VALUATION`. Múltiplo-base (`multiplo_base`, 8,5) já é parâmetro em `Limiares`, não constante. Testado em `tests/test_recommendation.py` | IMPLEMENTADO (2026-09-27) |
+| ISS-F4 | Médio | Limiares (20%, 12%, 85/90) e score de confiança são heurísticos, sem backtest ou calibração; sem noção de setor | Confiança sem significado estatístico | Backtest (`TASK-40`); limiares configuráveis e versionados | EM ANDAMENTO: limiares versionados em `limiares.py` e calibrados por backtest (`TASK-41`, `DEC-07`); score de confiança e setor seguem heurísticos |
+| ISS-F5 | Médio | A recomendação principal (valuation) usa um único snapshot; a série histórica entra só como sinal técnico separado | Momentum e reversão à média já são calculados sobre a série (≥ 20 candles) e gravados no insight e no diário, mas não pesam na recomendação; o acerto deles ainda não foi medido | Medir os sinais técnicos no diário/backtest antes de combiná-los à recomendação | EM ANDAMENTO (TASK-30, TASK-31 concluídas) |
+| ISS-F6 | Médio | Rótulos "COMPRA/VENDA" podem configurar recomendação de investimento (atividade regulada pela CVM, Res. 20/2021) | Risco regulatório/reputacional se exposto a usuários finais | Rotular como "sinal quantitativo", incluir disclaimer no payload, revisar com jurídico | PLANEJADO |
+| ISS-F7 | Alto | ~~Retorno do backtest/diário usa preço bruto (COTAHIST), sem proventos~~ | `app/validacao/avaliador.py` (`avaliar`, `_proventos_no_periodo`), `app/validacao/proventos.py` | ~~Pagadora de dividendo parecia sistematicamente pior do que era~~ | Retorno passa a somar proventos com data-com na janela [entrada, saída) do sinal, lidos de `provento_distribuido` (gestor-ativos-brutos, endpoint da B3). Fonte devolve janela móvel de ~12 meses anteriores a cada coleta (não um corte fixo); sinais fora dessa janela ficam sem ajuste. Testado em `tests/test_avaliador.py` (`test_provento_na_janela_soma_ao_retorno` e correlatos) | IMPLEMENTADO (2026-09-27), cobertura EM ANDAMENTO (ver TASK-46) |
 
 ---
 
@@ -349,63 +361,63 @@ Cada tarefa referencia os itens que resolve. Ordem sugerida: fases 0 → 4. Dent
 
 | ID | Tarefa | Resolve | Arquivos-alvo | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|---|
-| TASK-01 | Commitar a feature de série histórica em branch `feature/serie-historica` | ISS-13 | `app/core/mapper/historical_series.py`, `app/core/service/serie_historica_service.py`, entidade, repositório | `git status` limpo; PR aberto | — | ABERTO |
-| TASK-02 | Criar `.dockerignore`, build multi-stage e usuário não-root | ISS-04 | `Dockerfile`, `.dockerignore` | `docker run --rm <img> ls -a /app` não lista `.env*`, `.venv`, `venv-local`, `.git`; `whoami` ≠ root | — | ABERTO |
-| TASK-03 | Remover/reescrever os testes legados | ISS-03 | `tests/test_trading_service.py`, `tests/test_aggregator_service.py`, `tests/test_e2e_flow.py` | `pytest tests -q` coleta sem erros | — | ABERTO |
-| TASK-04 | Testes unitários do domínio (`valuation`, `technical_context`, `recommendation`, `insight_payload`, `historical_series`) com os critérios da seção 6.1 | ISS-03, NFR-06 | `tests/analysis/*` | Cobertura de `app/core/analysis` ≥ 90% | TASK-03 | ABERTO |
-| TASK-05 | Job de CI com pytest + lint antes do build; `latest` apenas em `main` | ISS-05 | `.github/workflows/*` | PR com teste vermelho não publica imagem | TASK-03 | ABERTO |
-| TASK-06 | Reescrever o README (remover resíduos, apontar para esta spec) | ISS-12 | `README.md` | Nenhuma afirmação contradiz esta spec | — | ABERTO |
+| TASK-01 | Commitar a feature de série histórica em branch `feature/serie-historica` | ISS-13 | `app/core/mapper/historical_series.py`, `app/core/service/serie_historica_service.py`, entidade, repositório | `git status` limpo; PR aberto | — | PLANEJADO |
+| TASK-02 | Criar `.dockerignore`, build multi-stage e usuário não-root | ISS-04 | `Dockerfile`, `.dockerignore` | `docker run --rm <img> ls -a /app` não lista `.env*`, `.venv`, `venv-local`, `.git`; `whoami` ≠ root | — | PLANEJADO |
+| TASK-03 | Remover/reescrever os testes legados | ISS-03 | `tests/test_trading_service.py`, `tests/test_aggregator_service.py`, `tests/test_e2e_flow.py` | `pytest tests -q` coleta sem erros | — | PLANEJADO |
+| TASK-04 | Testes unitários do domínio (`valuation`, `technical_context`, `recommendation`, `insight_payload`, `historical_series`) com os critérios da seção 6.1 | ISS-03, NFR-06 | `tests/analysis/*` | Cobertura de `app/core/analysis` ≥ 90% | TASK-03 | PLANEJADO |
+| TASK-05 | Job de CI com pytest + lint antes do build; `latest` apenas em `main` | ISS-05 | `.github/workflows/*` | PR com teste vermelho não publica imagem | TASK-03 | PLANEJADO |
+| TASK-06 | Reescrever o README (remover resíduos, apontar para esta spec) | ISS-12 | `README.md` | Nenhuma afirmação contradiz esta spec | — | PLANEJADO |
 
 ### Fase 1 — Confiabilidade
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-10 | Tirar os `commit()` dos repositórios; unidade de trabalho única no `CoreProcessor` | ISS-01, NFR-01 | *Dado* uma falha forçada em `salvar_insight`, *quando* a mensagem é processada, *então* nenhuma linha nova existe em `historico_acoes` | TASK-04 | CONCLUIDO (2026-09-26) |
-| TASK-11 | Chave de idempotência para snapshots e insights | ISS-02, NFR-02 | Processar a mesma mensagem 2× gera 1 linha em cada tabela | TASK-10, DEC-01 | CONCLUIDO (2026-09-26) |
-| TASK-12 | DLQ com `maxReceiveCount` configurável | ISS-06, NFR-03 | Mensagem que sempre falha chega à DLQ após N tentativas | — | CONCLUIDO na infra (2026-09-26) |
-| TASK-13 | Logger único, JSON, nível via `Settings.log_level` | ISS-08, NFR-04 | Cada evento aparece uma vez; `LOG_LEVEL=DEBUG` habilita logs de debug | — | ABERTO |
-| TASK-14 | Reutilizar o cliente SQS; retry do banco via `Settings` | ISS-09, ISS-10, NFR-07 | Uma instância de cliente por processo; nenhum `os.getenv` fora de `settings.py` | — | ABERTO |
-| TASK-15 | Migrations com Alembic (ou `create_all` controlado por flag) | ISS-07 | Banco vazio + `alembic upgrade head` cria as 3 tabelas usadas | DEC-01 | ABERTO |
-| TASK-16 | Limpeza de código morto e dependências não usadas | ISS-11 | `requirements.txt` só com dependências importadas | — | ABERTO |
+| TASK-10 | Tirar os `commit()` dos repositórios; unidade de trabalho única no `CoreProcessor` | ISS-01, NFR-01 | *Dado* uma falha forçada em `salvar_insight`, *quando* a mensagem é processada, *então* nenhuma linha nova existe em `historico_acoes` | TASK-04 | IMPLEMENTADO (2026-09-26) |
+| TASK-11 | Chave de idempotência para snapshots e insights | ISS-02, NFR-02 | Processar a mesma mensagem 2× gera 1 linha em cada tabela | TASK-10, DEC-01 | IMPLEMENTADO (2026-09-26) |
+| TASK-12 | DLQ com `maxReceiveCount` configurável | ISS-06, NFR-03 | Mensagem que sempre falha chega à DLQ após N tentativas | — | IMPLEMENTADO na infra (2026-09-26) |
+| TASK-13 | Logger único, JSON, nível via `Settings.log_level` | ISS-08, NFR-04 | Cada evento aparece uma vez; `LOG_LEVEL=DEBUG` habilita logs de debug | — | PLANEJADO |
+| TASK-14 | Reutilizar o cliente SQS; retry do banco via `Settings` | ISS-09, ISS-10, NFR-07 | Uma instância de cliente por processo; nenhum `os.getenv` fora de `settings.py` | — | PLANEJADO |
+| TASK-15 | Usar exclusivamente migrations Flyway da infraestrutura | ISS-07 | Worker não cria/atualiza tabelas; inbox na V11 | DEC-01 | IMPLEMENTADO |
+| TASK-16 | Limpeza de código morto e dependências não usadas | ISS-11 | `requirements.txt` só com dependências importadas | — | PLANEJADO |
 
 ### Fase 2 — Qualidade financeira
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-20 | Graham com ajuste `× 4,4 / Y`, com `Y` configurável | ISS-F1, REQ-08 | *Dado* `LPA=2`, `g=3`, `Y=4,4`, *então* `V=29`; *dado* `Y=8,8`, *então* `V=14,5` — ambos os casos em `tests/test_valuation.py::test_criterio_aceite_task20_*` | TASK-04, DEC-02 | CONCLUIDO (2026-09-27) |
-| TASK-21 | Aceitar VPA e calcular o Graham Number como métrica complementar | ISS-F2 | Campo `graham_number` no payload quando houver VPA > 0 | VPA lido de `indicador_fundamentalista` (CVM, pela data de entrega), não do produtor Java | CONCLUIDO (2026-09-27): `valuation.graham_number`, trava de `COMPRA_FORTE` em `recommendation.py` |
-| TASK-22 | Faixa neutra para `VENDA_VALUATION`; limiares em configuração versionada | ISS-F3, ISS-F4 | Limiares lidos de config; testes cobrem as bordas | TASK-04 | CONCLUIDO (2026-09-27): `app/core/analysis/limiares.py`; bordas em `tests/test_recommendation.py` |
-| TASK-23 | `versao_payload = "3.0"` com campo `aviso_legal` e rótulos revisados | ISS-F6, REQ-09 | Todo insight contém `aviso_legal`; consumidores informados | DEC-05 | ABERTO |
+| TASK-20 | Graham com ajuste `× 4,4 / Y`, com `Y` configurável | ISS-F1, REQ-08 | *Dado* `LPA=2`, `g=3`, `Y=4,4`, *então* `V=29`; *dado* `Y=8,8`, *então* `V=14,5` — ambos os casos em `tests/test_valuation.py::test_criterio_aceite_task20_*` | TASK-04, DEC-02 | IMPLEMENTADO (2026-09-27) |
+| TASK-21 | Aceitar VPA e calcular o Graham Number como métrica complementar | ISS-F2 | Campo `graham_number` no payload quando houver VPA > 0 | VPA lido de `indicador_fundamentalista` (CVM, pela data de entrega), não do produtor Java | IMPLEMENTADO (2026-09-27): `valuation.graham_number`, trava de `COMPRA_FORTE` em `recommendation.py` |
+| TASK-22 | Faixa neutra para `VENDA_VALUATION`; limiares em configuração versionada | ISS-F3, ISS-F4 | Limiares lidos de config; testes cobrem as bordas | TASK-04 | IMPLEMENTADO (2026-09-27): `app/core/analysis/limiares.py`; bordas em `tests/test_recommendation.py` |
+| TASK-23 | `versao_payload = "3.0"` com campo `aviso_legal` e rótulos revisados | ISS-F6, REQ-09 | Todo insight contém `aviso_legal`; consumidores informados | DEC-05 | PLANEJADO |
 
 ### Fase 3 — Análise com histórico
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-30 | Serviço de indicadores sobre `serie_historica`: MM20, volume médio 20d, z-score 52s | ISS-F5, REQ-07 | Funções puras testadas com séries sintéticas | TASK-01, TASK-04 | CONCLUIDO (2026-09-26): `app/core/analysis/technical_series.py`, com preço ajustado por proventos; testes em `tests/test_technical_series_analyzer.py` |
-| TASK-31 | Conectar `MomentumStrategy` e `MeanReversionStrategy` como sinais técnicos | ISS-F5 | Sinais preenchidos quando houver ≥ 20 candles | TASK-30 | CONCLUIDO (2026-09-26): `SerieTecnicaService` grava `sinal_momentum`/`sinal_reversao` em `detalhes_json.contexto_tecnico_serie` (nome real do campo, não `sinais_tecnicos`) e o diário os registra; eles NÃO alteram a recomendação principal, que segue a de valuation |
-| TASK-32 | Fonte de P/L setorial para `ValuationStrategy` (ou remover a estratégia) | ISS-F4 | Decisão registrada em DEC; estratégia ativa ou removida | DEC-06 | ABERTO |
+| TASK-30 | Serviço de indicadores sobre `serie_historica`: MM20, volume médio 20d, z-score 52s | ISS-F5, REQ-07 | Funções puras testadas com séries sintéticas | TASK-01, TASK-04 | IMPLEMENTADO (2026-09-26): `app/core/analysis/technical_series.py`, com preço ajustado por proventos; testes em `tests/test_technical_series_analyzer.py` |
+| TASK-31 | Conectar `MomentumStrategy` e `MeanReversionStrategy` como sinais técnicos | ISS-F5 | Sinais preenchidos quando houver ≥ 20 candles | TASK-30 | IMPLEMENTADO (2026-09-26): `SerieTecnicaService` grava `sinal_momentum`/`sinal_reversao` em `detalhes_json.contexto_tecnico_serie` (nome real do campo, não `sinais_tecnicos`) e o diário os registra; eles NÃO alteram a recomendação principal, que segue a de valuation |
+| TASK-32 | Fonte de P/L setorial para `ValuationStrategy` (ou remover a estratégia) | ISS-F4 | Decisão registrada em DEC; estratégia ativa ou removida | DEC-06 | PLANEJADO |
 
 ### Fase 4 — Validação
 
 | ID | Tarefa | Resolve | Critério de aceite | Depende de | Status |
 |---|---|---|---|---|---|
-| TASK-40 | Backtest walk-forward sem viés de futuro: snapshot reconstruído com COTAHIST e LPA TTM **com `DT_RECEB` ≤ t** (arquivo-índice do DFP/ITR; defasagem mediana de 79 dias entre fim do exercício e entrega), amostragem mensal, teste congelado de 2023 em diante, contra a média da carteira e o CDI | ISS-F4 | Relatório por classe × horizonte (21/63/126 pregões) com n, acerto vs taxa-base, excesso e IC por bootstrap; mesmos parâmetros → mesmos números | TASK-42, TASK-43; ETL: `DT_RECEB`, COTAHIST 2016+ | ABERTO |
-| TASK-41 | Recalibrar limiares com base no backtest | ISS-F4 | Nova versão de limiares registrada em DEC (e `VERSAO_REGRA` incrementada) | TASK-40 | CONCLUIDO (2026-09-27): `python -m app.validacao.calibracao`; `margem_venda` −15 → −100, `VERSAO_REGRA` 2026.09.27-2, números em `DEC-07`. Score de confiança não recalibrado (fica para depois do diário ter amostra) |
-| TASK-42 | Motor de avaliação único para backtest e diário (`app/validacao/avaliador.py`): entrada na abertura do pregão seguinte, saída no fechamento do h-ésimo pregão, custo 0,10% ida e volta, excesso sobre a média da carteira (V5) e sobre o CDI, acerto só para recomendação com direção, janela com salto ≥ 40% marcada como suspeita | ISS-F4 | `tests/test_avaliador.py` (14 casos) | — | CONCLUIDO (2026-09-26) |
-| TASK-43 | `VERSAO_REGRA` (`app/core/analysis/versao_regra.py`) gravada em todo `detalhes_json`; incrementar a cada mudança que altere a saída | ISS-F4 | Teste fixa a versão atual | — | CONCLUIDO (2026-09-26) |
-| TASK-44 | Diário de sinais (`python -m app.validacao.diario registrar|avaliar`): um sinal por ativo por pregão por versão, só inclusão (`infra#CTR-11`) | ISS-F4 | `tests/test_diario.py` (16 casos); registrar duas vezes não duplica; horizonte só é avaliado quando vence | TASK-42, TASK-43 | CONCLUIDO (2026-09-26) |
-| TASK-45 | Agendar `registrar` e `avaliar` todo dia útil após o fechamento (Agendador de Tarefas do Windows chamando `docker compose run`) | ISS-F4 | Um registro por pregão sem intervenção manual | TASK-44 | ABERTO |
-| TASK-46 | Backfill histórico de proventos (2017+) para o backtest todo, não só a janela móvel de ~12 meses da B3 ao vivo | ISS-F7 | Fonte alternativa à B3 ao vivo (que só cobre ~12 meses por coleta) identificada e carregada; retorno do backtest inteiro passa a incluir proventos, não só os sinais recentes | TASK-40; `provento_distribuido` (gestor) | ABERTO |
-| TASK-47 | `app/validacao/proventos.py`: distinguir provento por classe de ação (ON/PN) via ISIN, em vez de usar o maior valor entre classes | ISS-F7 | Teste com evento de valores diferentes por classe usa o valor da classe correta, não o maior | TASK-46 | ABERTO |
-| TASK-50 | Placar com intervalo de confiança: `agregar` grava desvio-padrão do excesso (CDI e carteira); acerto com Wilson 95% | ISS-F4, `infra#TASK-30` | `backtest_placar` com `desvio_excesso_*`; leitura "acima da base" exige IC acima da taxa-base | — | CONCLUIDO (2026-09-27) |
+| TASK-40 | Backtest walk-forward sem viés de futuro: snapshot reconstruído com COTAHIST e LPA TTM **com `DT_RECEB` ≤ t** (arquivo-índice do DFP/ITR; defasagem mediana de 79 dias entre fim do exercício e entrega), amostragem mensal, teste congelado de 2023 em diante, contra a média da carteira e o CDI | ISS-F4 | Relatório por classe × horizonte (21/63/126 pregões) com n, acerto vs taxa-base, excesso e IC por bootstrap; mesmos parâmetros → mesmos números | TASK-42, TASK-43; ETL: `DT_RECEB`, COTAHIST 2016+ | PLANEJADO |
+| TASK-41 | Recalibrar limiares com base no backtest | ISS-F4 | Nova versão de limiares registrada em DEC (e `VERSAO_REGRA` incrementada) | TASK-40 | IMPLEMENTADO (2026-09-27): `python -m app.validacao.calibracao`; `margem_venda` −15 → −100, `VERSAO_REGRA` 2026.09.27-2, números em `DEC-07`. Score de confiança não recalibrado (fica para depois do diário ter amostra) |
+| TASK-42 | Motor de avaliação único para backtest e diário (`app/validacao/avaliador.py`): entrada na abertura do pregão seguinte, saída no fechamento do h-ésimo pregão, custo 0,10% ida e volta, excesso sobre a média da carteira (V5) e sobre o CDI, acerto só para recomendação com direção, janela com salto ≥ 40% marcada como suspeita | ISS-F4 | `tests/test_avaliador.py` (14 casos) | — | IMPLEMENTADO (2026-09-26) |
+| TASK-43 | `VERSAO_REGRA` (`app/core/analysis/versao_regra.py`) gravada em todo `detalhes_json`; incrementar a cada mudança que altere a saída | ISS-F4 | Teste fixa a versão atual | — | IMPLEMENTADO (2026-09-26) |
+| TASK-44 | Diário de sinais (`python -m app.validacao.diario registrar|avaliar`): um sinal por ativo por pregão por versão, só inclusão (`infra#CTR-11`) | ISS-F4 | `tests/test_diario.py` (16 casos); registrar duas vezes não duplica; horizonte só é avaliado quando vence | TASK-42, TASK-43 | IMPLEMENTADO (2026-09-26) |
+| TASK-45 | Agendar `registrar` e `avaliar` todo dia útil após o fechamento (Agendador de Tarefas do Windows chamando `docker compose run`) | ISS-F4 | Um registro por pregão sem intervenção manual | TASK-44 | PLANEJADO |
+| TASK-46 | Backfill histórico de proventos (2017+) para o backtest todo, não só a janela móvel de ~12 meses da B3 ao vivo | ISS-F7 | Fonte alternativa à B3 ao vivo (que só cobre ~12 meses por coleta) identificada e carregada; retorno do backtest inteiro passa a incluir proventos, não só os sinais recentes | TASK-40; `provento_distribuido` (gestor) | PLANEJADO |
+| TASK-47 | `app/validacao/proventos.py`: distinguir provento por classe de ação (ON/PN) via ISIN, em vez de usar o maior valor entre classes | ISS-F7 | Teste com evento de valores diferentes por classe usa o valor da classe correta, não o maior | TASK-46 | PLANEJADO |
+| TASK-50 | Placar com intervalo de confiança: `agregar` grava desvio-padrão do excesso (CDI e carteira); acerto com Wilson 95% | ISS-F4, `infra#TASK-30` | `backtest_placar` com `desvio_excesso_*`; leitura "acima da base" exige IC acima da taxa-base | — | IMPLEMENTADO (2026-09-27) |
 | TASK-51 | Backtest sobre o universo amplo (`universo_backtest`, point-in-time, com deslistadas) e régua = média do universo | ISS-F4, `infra#TASK-31` | ≥ 3× janelas; cobertura por ano nas observações | TASK-50, **TASK-59 (bloqueador achado em 27/09)** | CONCLUIDO (2026-09-27): COTAHIST amplo 2016-2026 (1.785 códigos, 1,16 mi pregões); universo point-in-time em `app/validacao/universo.py` (≥ 200 pregões e ≥ R$ 5 mi/dia no ano anterior, sem units nem BDRs, com deslistadas): 93 a 191 ações por ano; DFP 2016-2025 de 249 empresas (`etl --universo-backtest`); backtest com 258 ativos, 15.732 amostras (5×); IC por bootstrap em blocos de meses (V12, `bootstrap.py`). **Resultado: nenhuma regra com vantagem distinguível** — acerto e excesso cruzam a base em todas as linhas, exceto a compra moderada da v1 antiga (+1,1% s/ carteira, IC +0,3 a +2,0). 38 papéis sem balanço por troca de código: `infra#TASK-45` |
-| TASK-52 | Momentum e reversão à média como regras próprias do backtest | ISS-F5, `infra#TASK-32` | Placar próprio; DEC sobre entrar na recomendação | TASK-51 | ABERTO |
-| TASK-53 | Curva de calibração do `confianca_score` | ISS-F4, `infra#TASK-33` | Acerto por faixa de score; DEC recalibrar/retirar | TASK-51 | ABERTO |
-| TASK-54 | Crescimento nominal (g + IPCA 12m) ou Y real (Selic − IPCA) na v1 | ISS-F1, DEC-07, `infra#TASK-34` | Fração de vendas estável entre calibração e teste (< 10 p.p.) | TASK-51 | CONCLUIDO (2026-09-27): modo G_NOMINAL, DEC-08; aceite < 10 p.p. quase atingido (11,6 p.p.) |
-| TASK-55 | `VENDA_VALUATION` → `SEM_MARGEM` sem direção até haver vantagem medida | ISS-F3, `infra#TASK-35` | Contrato versionado com gestor e painel | TASK-50 | ABERTO |
-| TASK-56 | Placar separando janelas com e sem dado de provento | ISS-F7, `infra#TASK-36` | Contagem de janelas ajustadas no placar | — | CONCLUIDO (2026-09-27): coluna `janelas_com_provento` (infra V10), exibida no painel; no backtest de 2017-2026, 1.273 de 22.980 janelas (5,5%) têm provento — a fonte cobre só os últimos ~12 meses |
+| TASK-52 | Momentum e reversão à média como regras próprias do backtest | ISS-F5, `infra#TASK-32` | Placar próprio; DEC sobre entrar na recomendação | TASK-51 | PLANEJADO |
+| TASK-53 | Curva de calibração do `confianca_score` | ISS-F4, `infra#TASK-33` | Acerto por faixa de score; DEC recalibrar/retirar | TASK-51 | PLANEJADO |
+| TASK-54 | Crescimento nominal (g + IPCA 12m) ou Y real (Selic − IPCA) na v1 | ISS-F1, DEC-07, `infra#TASK-34` | Fração de vendas estável entre calibração e teste (< 10 p.p.) | TASK-51 | IMPLEMENTADO (2026-09-27): modo G_NOMINAL, DEC-08; aceite < 10 p.p. quase atingido (11,6 p.p.) |
+| TASK-55 | `VENDA_VALUATION` → `SEM_MARGEM` sem direção até haver vantagem medida | ISS-F3, `infra#TASK-35` | Contrato versionado com gestor e painel | TASK-50 | PLANEJADO |
+| TASK-56 | Placar separando janelas com e sem dado de provento | ISS-F7, `infra#TASK-36` | Contagem de janelas ajustadas no placar | — | IMPLEMENTADO (2026-09-27): coluna `janelas_com_provento` (infra V10), exibida no painel; no backtest de 2017-2026, 1.273 de 22.980 janelas (5,5%) têm provento — a fonte cobre só os últimos ~12 meses |
 | TASK-57 | Recalibrar no universo amplo pelo limite inferior do IC | ISS-F4, `infra#TASK-37` | DEC com limiares e intervalo | TASK-51, TASK-54 | CONCLUIDO (2026-09-27), sem mudança de limiares — ver `gerar-insights#DEC-09`: nenhuma das 1.944 combinações válidas teve o limite inferior do IC da separação acima de zero na calibração (melhor: −2,1 a +3,2 p.p.) |
-| TASK-58 | Decidir v1 × v2 | `infra#TASK-38` | DEC; `VERSAO_REGRA` incrementada | TASK-57 | ABERTO |
+| TASK-58 | Decidir v1 × v2 | `infra#TASK-38` | DEC; `VERSAO_REGRA` incrementada | TASK-57 | PLANEJADO |
 | TASK-59 | Ingestão de COTAHIST amplo (todos os tickers negociados por ano, não só os 31 monitorados) - pré-requisito real do TASK-51/infra#TASK-31 | ISS-F4, `infra#TASK-31` | `cotacao_b3_diaria` com centenas de símbolos/ano, incluindo os que saíram de negociação; confirmado com `COUNT(DISTINCT simbolo)` bem acima de 36 | — | CONCLUIDO (2026-09-27): carga ampla rodada (implementação da sessão paralela, a1ed827..f3b3a1c; carga e verificação pela sessão "Projeto para hoje") — 1.785 códigos em `cotacao_b3_diaria` |
 
 ---
@@ -414,14 +426,14 @@ Cada tarefa referencia os itens que resolve. Ordem sugerida: fases 0 → 4. Dent
 
 | ID | Pergunta | Opções | Status | Decisão / data |
 |---|---|---|---|---|
-| DEC-01 | Quem é dono do schema MySQL? | (a) app Java; (b) este worker via Alembic; (c) repositório de migrations compartilhado | ABERTO — decidido no nível do ecossistema (`infra#DEC-01`) | — |
-| DEC-02 | Qual taxa usar como `Y` no Graham ajustado? | NTN-B longa (real) / Selic / CDI / valor fixo configurável | RESOLVIDO (2026-09-27): **Selic meta vigente** (SGS 432, `indice_macro.codigo_serie = 'SELIC'`, % a.a.), a do dia da análise; no backtest, a vigente na data do sinal. Motivos: é a única taxa livre de risco que o ecossistema já coleta (o gestor a grava e o painel a mostra em Índices); NTN-B longa exigiria ingerir os preços do Tesouro Direto e fica como evolução. Sem taxa disponível, o insight sai `SEM_DADOS` em vez de cair na fórmula sem ajuste (misturaria duas regras sob a mesma versão). A fórmula de 1962 (`Y = 4,4`, fator 1) continua calculada em `cenarios_graham_sem_ajuste_juros`, **só como referência histórica** — não entra na recomendação. Consequência conhecida: `Y` nominal com `g` real (0/3/5) é conservador; tratado nas sessões de ISS-F2/F3 | — |
-| DEC-03 | Política de retenção de `historico_acoes` | manter tudo / agregar por dia / expurgar após N dias | ABERTO | — |
-| DEC-04 | DynamoDB: implementar ou remover do projeto? | implementar / remover | RESOLVIDO: removido (config morta em `settings.py`/`aws_config.py`, nunca usada) | — |
-| DEC-05 | Nomenclatura das recomendações | manter COMPRA/VENDA / "sinal quantitativo" (ex.: `SINAL_POSITIVO_FORTE`) | ABERTO | — |
-| DEC-06 | Fonte de P/L setorial | API externa / tabela manual / calcular a partir de `ativos` | ABERTO | — |
-| DEC-07 | Limiares da v1 depois do ajuste de juros (TASK-41) | manter os da fórmula sem juros / calibrar por backtest | RESOLVIDO (2026-09-27): **calibrados**. Protocolo (`app/validacao/calibracao.py`): grade de 1.440 combinações de `multiplo_base`, margens e earnings yield, avaliada só na calibração (sinais até 2022-12-31, horizonte 63 pregões); objetivo = excesso médio sobre a carteira das compras menos o das vendas, com ≥ 60 janelas em cada lado e venda em no máximo 50% das janelas (sem esta trava a primeira passada escolheu 92% de venda no teste). O teste (2023+) foi olhado uma vez, como veredito. Adotado: `margem_venda = −100`; demais limiares mantidos (empatavam no topo). Medido no teste, 63 pregões: separação compra × venda **3,4 p.p.** (v1 com −15: 2,9; v1 antiga sem juros: 2,4); compras 24 janelas, acerto 58% (taxa-base 52%), +3,6% sobre a carteira; vendas 69% das janelas, acerto 51% (≈ taxa-base: sem vantagem). **Não generalizou**: a fração de vendas (49% na calibração, 69% no teste) depende do regime de juros, porque `Y` é nominal e `g` é real — com Selic de 2–6% (calibração) o fator 4,4/Y é ~1, com 11–15% (teste) é ~0,3. Próximo passo: crescimento nominal (`g` + IPCA), como a v2 já faz | — |
-| DEC-08 | Como combinar juros e crescimento no Graham da v1 (TASK-54)? | G_REAL (Y = Selic, g real — a 2026.09.27-2) / G_NOMINAL (Y = Selic, g = real + IPCA 12m) / Y_REAL (Y = Selic − IPCA 12m, g real) | RESOLVIDO (2026-09-27): **G_NOMINAL**, `VERSAO_REGRA` 2026.09.27-3. Motivo a priori (antes dos números): nominal com nominal — o G_REAL misturava as bases e por isso a margem acompanhava a Selic (DEC-07). Medição (`calibracao.py`, os três modos com os mesmos critérios; limiares escolhidos só na calibração, 63 pregões): fração de vendas calibração → teste G_REAL 49% → 70% (21,5 p.p.), **G_NOMINAL 20% → 32% (11,6 p.p.)**, Y_REAL 9% → 26% (16,8 p.p.); separação compra × venda no teste 3,2 / 3,1 / 2,3 p.p. O aceite da TASK-54 (< 10 p.p.) **não foi atingido por completo**, mas o G_NOMINAL ficou perto e é o melhor dos três. Limiares: `margem_venda` −150 (calibrado), demais mantidos (empatavam; ficaram os mais conservadores). No backtest de teste: compras fortes 48 janelas, +4,6% sobre a carteira; vendas 334 janelas, acerto 54,8% contra taxa-base de 46,5% e −1,0% sobre a carteira — primeira vantagem de venda medida. Nas cotações de 27/09: 14 vendas, 12 manter, 1 compra (antes 24 vendas de 26). Ressalva: a trava de estabilidade medida só dentro da calibração (2017–2019 × 2020–2022) não discriminou os modos, porque a Selic média dos dois sub-períodos é parecida; a escolha entre modos usou o critério do teste que a própria TASK-54 definiu | — |
+| DEC-01 | Quem é dono do schema MySQL? | Infraestrutura/Flyway exclusivamente; worker não executa DDL nem Alembic | IMPLEMENTADO — `infra#DEC-01`, V1–V11 | — |
+| DEC-02 | Qual taxa usar como `Y` no Graham ajustado? | NTN-B longa (real) / Selic / CDI / valor fixo configurável | IMPLEMENTADO (2026-09-27): **Selic meta vigente** (SGS 432, `indice_macro.codigo_serie = 'SELIC'`, % a.a.), a do dia da análise; no backtest, a vigente na data do sinal. Motivos: é a única taxa livre de risco que o ecossistema já coleta (o gestor a grava e o painel a mostra em Índices); NTN-B longa exigiria ingerir os preços do Tesouro Direto e fica como evolução. Sem taxa disponível, o insight sai `SEM_DADOS` em vez de cair na fórmula sem ajuste (misturaria duas regras sob a mesma versão). A fórmula de 1962 (`Y = 4,4`, fator 1) continua calculada em `cenarios_graham_sem_ajuste_juros`, **só como referência histórica** — não entra na recomendação. Consequência conhecida: `Y` nominal com `g` real (0/3/5) é conservador; tratado nas sessões de ISS-F2/F3 | — |
+| DEC-03 | Política de retenção de `historico_acoes` | manter tudo / agregar por dia / expurgar após N dias | PLANEJADO | — |
+| DEC-04 | DynamoDB: implementar ou remover do projeto? | implementar / remover | IMPLEMENTADO: removido (config morta em `settings.py`/`aws_config.py`, nunca usada) | — |
+| DEC-05 | Nomenclatura das recomendações | manter COMPRA/VENDA / "sinal quantitativo" (ex.: `SINAL_POSITIVO_FORTE`) | PLANEJADO | — |
+| DEC-06 | Fonte de P/L setorial | API externa / tabela manual / calcular a partir de `ativos` | PLANEJADO | — |
+| DEC-07 | Limiares da v1 depois do ajuste de juros (TASK-41) | manter os da fórmula sem juros / calibrar por backtest | IMPLEMENTADO (2026-09-27): **calibrados**. Protocolo (`app/validacao/calibracao.py`): grade de 1.440 combinações de `multiplo_base`, margens e earnings yield, avaliada só na calibração (sinais até 2022-12-31, horizonte 63 pregões); objetivo = excesso médio sobre a carteira das compras menos o das vendas, com ≥ 60 janelas em cada lado e venda em no máximo 50% das janelas (sem esta trava a primeira passada escolheu 92% de venda no teste). O teste (2023+) foi olhado uma vez, como veredito. Adotado: `margem_venda = −100`; demais limiares mantidos (empatavam no topo). Medido no teste, 63 pregões: separação compra × venda **3,4 p.p.** (v1 com −15: 2,9; v1 antiga sem juros: 2,4); compras 24 janelas, acerto 58% (taxa-base 52%), +3,6% sobre a carteira; vendas 69% das janelas, acerto 51% (≈ taxa-base: sem vantagem). **Não generalizou**: a fração de vendas (49% na calibração, 69% no teste) depende do regime de juros, porque `Y` é nominal e `g` é real — com Selic de 2–6% (calibração) o fator 4,4/Y é ~1, com 11–15% (teste) é ~0,3. Próximo passo: crescimento nominal (`g` + IPCA), como a v2 já faz | — |
+| DEC-08 | Como combinar juros e crescimento no Graham da v1 (TASK-54)? | G_REAL (Y = Selic, g real — a 2026.09.27-2) / G_NOMINAL (Y = Selic, g = real + IPCA 12m) / Y_REAL (Y = Selic − IPCA 12m, g real) | IMPLEMENTADO (2026-09-27): **G_NOMINAL**, `VERSAO_REGRA` 2026.09.27-3. Motivo a priori (antes dos números): nominal com nominal — o G_REAL misturava as bases e por isso a margem acompanhava a Selic (DEC-07). Medição (`calibracao.py`, os três modos com os mesmos critérios; limiares escolhidos só na calibração, 63 pregões): fração de vendas calibração → teste G_REAL 49% → 70% (21,5 p.p.), **G_NOMINAL 20% → 32% (11,6 p.p.)**, Y_REAL 9% → 26% (16,8 p.p.); separação compra × venda no teste 3,2 / 3,1 / 2,3 p.p. O aceite da TASK-54 (< 10 p.p.) **não foi atingido por completo**, mas o G_NOMINAL ficou perto e é o melhor dos três. Limiares: `margem_venda` −150 (calibrado), demais mantidos (empatavam; ficaram os mais conservadores). No backtest de teste: compras fortes 48 janelas, +4,6% sobre a carteira; vendas 334 janelas, acerto 54,8% contra taxa-base de 46,5% e −1,0% sobre a carteira — primeira vantagem de venda medida. Nas cotações de 27/09: 14 vendas, 12 manter, 1 compra (antes 24 vendas de 26). Ressalva: a trava de estabilidade medida só dentro da calibração (2017–2019 × 2020–2022) não discriminou os modos, porque a Selic média dos dois sub-períodos é parecida; a escolha entre modos usou o critério do teste que a própria TASK-54 definiu | — |
 | DEC-09 | Recalibrar os limiares da v1 no universo amplo (TASK-57, `infra#TASK-37`)? | adotar a melhor combinação / manter a 2026.09.27-3 | RESOLVIDO (2026-09-27): **manter**, sem mudança de `VERSAO_REGRA`. Protocolo (`calibracao.py`): universo point-in-time de 258 ativos (15.732 amostras), grade de 3 modos de juros × 4 múltiplos × margens × earnings yield (1.944 combinações válidas: amostra mínima, ≤ 50% de vendas, estável entre 2017–2019 e 2020–2022), 30 finalistas pela separação pontual, escolha pelo **limite inferior do IC 95% da separação compra × venda por bootstrap em blocos de meses**, só na calibração. Resultado: **nenhum limite inferior acima de zero** (melhor: Y_REAL, múltiplo 15, venda −100 → separação +0,7 p.p., IC −2,1 a +3,2; atuais: IC −2,4 a +3,1). No teste: melhor +1,0 p.p. (IC −0,6 a +3,0), atuais −0,7 p.p. (IC −3,7 a +2,5), v1 antiga 0,0 (IC −2,7 a +2,3). Trocar para a "melhor" seria escolher ruído. Conclusão: no universo amplo, a família de regras de valuation Graham + margem + earnings yield **não tem vantagem mensurável**; afinar limiares não resolve. Próximos passos estão fora de limiar: medir outros sinais (momentum e reversão, TASK-52; qualidade — ROE, dívida — como filtro) e seguir o diário. Relatório completo da calibração: saída de `python -m app.validacao.calibracao` | — |
 
 ---
@@ -471,3 +483,98 @@ awslocal sqs send-message \
 ```
 
 Resultado esperado da mensagem de teste (regras atuais): cenário base `preco_justo = 29`, `margem ≈ 65,52%`, `EY = 20%`, MS conservador = 41,18% → `COMPRA_FORTE`.
+
+## Revisão integrada de 2026-09-27
+
+| Entrega | Estado | Evidência e limite |
+|---|---|---|
+| Proprietário único do schema | IMPLEMENTADO | Infra/Flyway: V1 bootstrap, V11 inbox; serviços não executam migrations |
+| Eventos e recomendações | IMPLEMENTADO | schemas canônicos em infra/contracts; enum gerado em Java, Python e JS; versões desconhecidas ficam para DLQ |
+| Leituras HTTP e idempotência | IMPLEMENTADO | GET sem persistência/publicação; inbox e efeitos na mesma transação; ACK posterior ao commit |
+| Verificação desta entrega | EM ANDAMENTO | Resultados registrados em infra/VERIFICACAO-2026-09-27.md; não representa deploy no banco em uso |
+
+## Plano LAC: 9 lacunas de assertividade (proposta de 30-09-2026, EM AVALIAÇÃO)
+
+Plano completo, fontes e a migração única **V16** em `infra-b3-ecossytem/SPEC.md`, seção Plano LAC.
+
+**Por que.** Execução 14 do backtest, período de teste (2023 em diante): nenhuma recomendação direcional tem intervalo de 95% do acerto acima da taxa-base (ex.: COMPRA_FORTE em 126 pregões, 40,4% contra 51,4% de base; VENDA_VALUATION em 63 pregões, 52,8% com IC 43,9%–62,3%). Na calibração os números eram melhores: sinal de regra ajustada ao passado. Este serviço cobre **L1 e L2 no cálculo de retorno, L5, L6, L7, L8, L9 e o método de avaliação**.
+
+### LAC-INS-1: retorno total com proventos (L1)
+
+- `avaliador.py` soma hoje só os proventos de `provento_distribuido` (janela de ~12 meses): de 2017 a 2024 o retorno sai **sem dividendos**, o que penaliza pagadoras (bancos, elétricas) e favorece VENDA_VALUATION.
+- Passa a somar os proventos da DVA (`provento_contabil.por_acao`) na mesma regra do sinal e da régua (carteira):
+  - **Data:** a marca ex do COTAHIST (`cotacao_b3_diaria.marca_ex` em ED, EJ, EDJ…). O total do trimestre é repartido entre as datas ex daquele trimestre.
+  - **Sem marca:** vale a `data_entrega` do documento.
+  - Onde `provento_distribuido` existir (evento com valor e data-com), ele prevalece.
+- `janelas_com_provento` do placar passa a refletir as duas fontes.
+
+### LAC-INS-2: preço ajustado por desdobramento (L2)
+
+- `RepositorioCotahist.series` aplica `evento_corporativo.fator_preco` acumulado **na leitura**. O COTAHIST bruto não é regravado.
+- A regra que descarta janelas com salto acima de 40% continua, mas só para saltos **sem** evento correspondente. Medir quantas janelas voltam a contar (ex.: RCSL3, −76% em 10-03-2026 com marca EB, hoje descartada como "provável desdobramento").
+- Preços já chegam divididos pelo FATCOT (LAC-ETL-7): AZUL53 e GOLL54 deixam de entrar multiplicados por 1.000.000 e 1.000.
+
+### LAC-INS-3: fatores de preço (L5)
+
+Cálculo mensal (primeiro pregão do mês, só com pregões anteriores) em `fator_valor`: `MOMENTO_12_1`, `VOLATILIDADE_12M`, `LIQUIDEZ_63D`, `BETA_12M`, `DRAWDOWN_12M`, sobre o preço ajustado (LAC-INS-2). Comando: `python -m app.fatores calcular --desde AAAA-MM`.
+
+Dois fatores a mais, com os campos novos do COTAHIST (entram em `fator_definicao`, sem migração nova):
+- `SPREAD_MEDIANO_63D`: `(melhor oferta de venda − melhor oferta de compra) / preço médio`, mediana em 63 pregões; direção −1.
+- `DISTANCIA_VWAP`: fechamento sobre o preço médio do dia (`preco_medio`); direção 0, só para estudo.
+
+**Custo do backtest pelo spread real:** metade do spread mediano do ativo em cada ponta, com piso nos 0,10% atuais. O custo fixo subestima ações pouco líquidas (p90 do spread em 3,4%).
+
+### LAC-INS-4: fatores de qualidade e valor (L6)
+
+`ROIC`, `ALAVANCAGEM`, `MARGEM_BRUTA`, `ACCRUALS`, `PIOTROSKI`, `CRESCIMENTO_LPA`, `EARNINGS_YIELD`, `BOOK_TO_MARKET` e `DIVIDEND_YIELD`, lendo o `indicador_fundamentalista` **vigente na data** (o de maior `data_entrega` até a data de referência: `DadosPontoNoTempo`). Piotroski usa as 4 contas novas (LAC-ETL-5); sem elas, o escore fica `NULL`, sem valor parcial.
+
+### LAC-INS-5: comparação no setor (L7)
+
+- `percentil_setor` e `grupo_setor` em cada `fator_valor`, pelo `setor_grupo` (revisado em LAC-INFRA-2).
+- Regra de valuation por grupo (`setor_grupo.regra_valuation`): GRAHAM para a maioria; PL_SETOR ou PVP_SETOR para financeiro; DIVIDENDOS para utilidade pública. A regra atual passa a ser uma versão entre outras no placar, não a única.
+
+### LAC-INS-6: fatores de evento (L8)
+
+`FATOS_RELEVANTES_90D` e `AVISOS_PROVENTOS_180D`, contando `comunicado_cvm` por `data_entrega`, nunca por `data_referencia` (36 datas inválidas).
+
+### LAC-INS-7: fatores de referência próprios (L9)
+
+`fator_mercado_mensal`, construídos com COTAHIST e CVM no lugar do NEFIN:
+
+| Fator | Carteira |
+|---|---|
+| MKT | Média do universo menos CDI |
+| SMB | Menor menos maior valor de mercado |
+| HML | Maior menos menor book-to-market |
+| WML | Maior menos menor momento |
+| IML | Menor menos maior liquidez |
+| QMJ | Maior menos menor qualidade |
+
+Uso: regressão do retorno da carteira do sinal contra esses fatores. O alfa (intercepto) mostra se a regra traz algo além de fatores conhecidos.
+
+### LAC-INS-8: método de avaliação por ranking
+
+- **Ranking entre ações.** Todo mês, ordenar o universo pelo score de cada versão de regra e gravar:
+  - `backtest_ranking_mes`: correlação de Spearman entre o score e o retorno seguinte, por horizonte;
+  - `backtest_ranking_quintil`: retorno médio de cada quintil.
+- **Janelas sucessivas** (`esquema_validacao = 'JANELAS_SUCESSIVAS'`): treino expandindo desde 2011, teste de 12 meses, avançando ano a ano; cada janela registrada em `janela`.
+- **Registro de tentativas:**
+  - `backtest_execucao.hipotese` é preenchida **antes** de rodar: o que se espera e por quê;
+  - `numero_tentativa` conta as tentativas da mesma família;
+  - a melhor de N tentativas precisa superar um limiar corrigido por N.
+- **Juízes intocados:** o período de 2023 a 2026 já foi visto e não serve mais sozinho para promover regra. Valem as janelas sucessivas mais o diário ao vivo (primeiros horizontes vencem a partir do fim de outubro de 2026).
+- O método por classes (`backtest_placar`) continua, para comparação com o histórico.
+
+### LAC-INS-9: placar e promoção de regra
+
+Uma versão de regra só é promovida se, nas janelas de teste:
+1. o intervalo de 95% da correlação de ranking média ficar acima de zero;
+2. a diferença entre o quintil 5 e o 1 ficar positiva depois de custos (0,1% ida e volta);
+3. o alfa contra os fatores de referência (LAC-INS-7) não for negativo;
+4. o diário ao vivo não contradisser.
+
+### Aceite
+
+- Backtest de 2011 a 2026 com proventos e desdobramentos, nos dois métodos (classes e ranking).
+- Ao menos 3 versões novas medidas (valor, valor com qualidade, valor com momento), cada uma com `hipotese` e `numero_tentativa` registrados antes de rodar.
+- Testes para: soma de proventos da DVA sem dupla contagem com `provento_distribuido`; ajuste de preço por evento; fatores sem olhar o futuro (fator do mês M usa só dados até o pregão de referência); correlação de ranking e quintis em série sintética conhecida.

@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "dedupKey",
+    "symbol",
+    "regularMarketPrice"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "dedupKey": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "symbol": {
+      "type": "string",
+      "minLength": 1
+    },
+    "regularMarketPrice": {
+      "type": "number",
+      "minimum": 0
+    },
+    "earningsPerShare": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

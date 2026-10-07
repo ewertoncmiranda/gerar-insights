@@ -50,7 +50,11 @@ from app.core.analysis.regra_v2 import VERSAO_REGRA_V2, EntradaV2, posicao_no_ra
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
 from app.core.analysis.valuation import TAXA_REFERENCIA_GRAHAM, ValuationAnalyzer
 from app.core.analysis.versao_regra import VERSAO_REGRA
-from app.validacao.proventos import agrupar_por_emissor_e_data, codigo_emissor
+from app.fatores.ajuste_preco import ajustar, fator_acumulado
+from app.fatores.fonte_proventos import FonteProventos
+from app.fatores.preco import PREGOES_TRIMESTRE, PregaoFator, spread_mediano
+from app.fatores.repositorio import RepositorioFatores
+from app.fatores.servico import emendar
 from app.validacao.avaliador import (
     CUSTO_IDA_E_VOLTA_PADRAO,
     HORIZONTES_PREGOES,
@@ -60,6 +64,7 @@ from app.validacao.avaliador import (
     avaliar,
     direcao,
     media_da_carteira,
+    tem_salto_suspeito,
 )
 from app.validacao.bootstrap import intervalo_em_blocos
 from app.validacao.ponto_no_tempo import DadosPontoNoTempo
@@ -233,18 +238,27 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
         ).bindparams(bindparam("codigos", expanding=True)),
         {"codigos": sorted(codigos)},
     ).all()
-    series = montar_series(linhas, identidades, universo)
+    brutas = montar_series(linhas, identidades, universo)
+    # LAC-INS-2: retornos sobre o preco ajustado por evento corporativo; o
+    # valuation do dia continua no preco BRUTO (o LPA e por acao da epoca).
+    repositorio_fatores = RepositorioFatores()
+    eventos = repositorio_fatores.eventos_corporativos(db)
+    series = {s: ajustar(velas, eventos.get(s, [])) for s, velas in brutas.items()}
+    spreads = _spreads_por_papel(db, repositorio_fatores, codigos, identidades)
     dados = DadosPontoNoTempo.carregar(db)
     cdi = {
         d: Decimal(str(v))
         for d, v in db.execute(text("SELECT data, valor FROM indice_macro WHERE codigo_serie='CDI' AND valor IS NOT NULL"))
     }
     datas_cdi = sorted(cdi)
-    # provento_distribuido e do gestor-ativos-brutos (ClienteB3Proventos);
-    # janela movel de ~12 meses anteriores a cada coleta (ver proventos.py).
-    proventos_por_emissor = agrupar_por_emissor_e_data(
-        db.execute(text("SELECT simbolo, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido")).all()
-    )
+    # LAC-INS-1: provento_distribuido (B3, ~12 meses por coleta) mais a DVA
+    # (provento_contabil) antes dele, em R$ por acao da epoca; aqui, na escala
+    # do preco ajustado (valor x fator dos eventos posteriores a data).
+    fonte_proventos = FonteProventos.carregar(db, repositorio_fatores)
+    proventos_por_papel = {
+        s: {d: v * fator_acumulado(eventos.get(s, []), d) for d, v in fonte_proventos.do_papel(s).items()}
+        for s in series
+    }
 
     observacoes = [
         f"Universo por ano (>= {PREGOES_MINIMOS} pregões e volume médio >= R$ {LIQUIDEZ_MINIMA / 1e6:.0f} mi/dia "
@@ -259,6 +273,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
     pregoes = {s: [Pregao(v.data, v.abertura, v.fechamento) for v in velas] for s, velas in series.items()}
     indice_por_data = {s: {p.data: i for i, p in enumerate(ps)} for s, ps in pregoes.items()}
     cache_media: dict[tuple[date, date], tuple[Decimal | None, int | None]] = {}
+    contagem_eventos: dict[str, int] = defaultdict(int)
 
     def media_entre(entrada: date, saida: date) -> tuple[Decimal | None, int | None]:
         """Regua da carteira: membros do universo do ano da entrada, uma vez por janela."""
@@ -272,7 +287,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
                 i, j = indice_por_data[s].get(entrada), indice_por_data[s].get(saida)
                 if i is not None and j is not None:
                     recorte[s] = ps[i : j + 1]
-            cache_media[chave] = media_da_carteira(recorte, entrada, saida, proventos_por_emissor)
+            cache_media[chave] = media_da_carteira(recorte, entrada, saida, proventos_por_papel, por_papel=True)
         return cache_media[chave]
 
     def cdi_entre(entrada: date, saida: date) -> dict[date, Decimal]:
@@ -282,22 +297,29 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
     amostras: list[Amostra] = []
     for simbolo, velas in sorted(series.items()):
         serie = pregoes[simbolo]
+        brutos = brutas[simbolo]
+        eventos_do_papel = eventos.get(simbolo, [])
         for i in primeiros_pregoes_do_mes(velas):
             dia = velas[i].data
             if dia < inicio or i < PREGOES_52_SEMANAS or simbolo not in universo_ano.get(dia.year, set()):
                 continue
+            # Faixa de 52 semanas na escala do preco do DIA (a do LPA): a
+            # janela ajustada, trazida de volta pelo fator vigente no dia.
+            escala = fator_acumulado(eventos_do_papel, dia)
             janela = velas[i - PREGOES_52_SEMANAS + 1 : i + 1]
             lpa_anual, _ = dados.lpa_em(simbolo, dia, usar_ttm=False)
             lpa_recente, fonte = dados.lpa_em(simbolo, dia, usar_ttm=True)
             lpas_anuais, vpa = dados.anuais_em(simbolo, dia)
             amostra = Amostra(
                 simbolo=simbolo, dia=dia, periodo="CALIBRACAO" if dia <= corte else "TESTE",
-                preco=float(velas[i].fechamento),
-                minima_52s=float(min(v.minima for v in janela)), maxima_52s=float(max(v.maxima for v in janela)),
+                preco=float(brutos[i].fechamento),
+                minima_52s=float(min(v.minima for v in janela) / escala),
+                maxima_52s=float(max(v.maxima for v in janela) / escala),
                 lpa_anual=lpa_anual, lpa_recente=lpa_recente, fonte_lpa_recente=fonte,
                 lpas_anuais=lpas_anuais, vpa=vpa, selic=dados.selic_em(dia), juros_cdi=dados.juros_em(dia),
                 ipca_12m=dados.ipca_12m_em(dia),
             )
+            custo = custo_pelo_spread(spreads.get(simbolo, []), dia)
             for horizonte in horizontes:
                 if i + horizonte >= len(serie):
                     continue
@@ -305,13 +327,51 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
                 resultado = avaliar(
                     dia, None, serie[i : i + horizonte + 1], horizonte,
                     cdi_diario=cdi_entre(entrada, saida),
-                    proventos=proventos_por_emissor.get(codigo_emissor(simbolo), {}),
+                    custo_ida_e_volta=custo,
+                    custo_carteira=CUSTO_IDA_E_VOLTA_PADRAO,
+                    proventos=proventos_por_papel.get(simbolo, {}),
                     media_carteira_pronta=media_entre(entrada, saida),
                 )
                 if resultado is not None:
                     amostra.resultados[horizonte] = resultado
+                    bruto = [Pregao(v.data, v.abertura, v.fechamento) for v in brutos[i : i + horizonte + 1]]
+                    if not resultado.evento_suspeito and tem_salto_suspeito(bruto):
+                        contagem_eventos["janelas_recuperadas"] += 1
             amostras.append(amostra)
+    if eventos:
+        observacoes.append(
+            f"Preço ajustado por {sum(len(v) for v in eventos.values())} evento(s) corporativo(s) "
+            f"(evento_corporativo); {contagem_eventos['janelas_recuperadas']} janela(s) que antes eram "
+            "descartadas como provável desdobramento voltaram a contar."
+        )
+    if any(fonte_proventos.do_papel(s) for s in series):
+        observacoes.append("Proventos: provento_distribuido (B3) e, antes dele, a DVA da CVM repartida pelas datas ex.")
+    if spreads:
+        observacoes.append(
+            "Custo por sinal: spread mediano de 63 pregões (melhor oferta de venda - de compra, sobre o preço médio), "
+            f"com piso de {CUSTO_IDA_E_VOLTA_PADRAO:.2%} ida e volta; a carteira paga o piso."
+        )
     return amostras, observacoes, len(series)
+
+
+def custo_pelo_spread(pregoes: list[PregaoFator], dia: date) -> Decimal:
+    """Metade do spread em cada ponta = um spread na ida e volta, com piso."""
+    datas = [p.data for p in pregoes]
+    i = bisect.bisect_left(datas, dia)
+    spread = spread_mediano(pregoes[max(0, i - PREGOES_TRIMESTRE) : i]) if i else None
+    if spread is None:
+        return CUSTO_IDA_E_VOLTA_PADRAO
+    return max(CUSTO_IDA_E_VOLTA_PADRAO, Decimal(str(round(spread, 6))))
+
+
+def _spreads_por_papel(db, repositorio: RepositorioFatores, codigos: set[str],
+                       identidades: dict[str, tuple[str, bool]]) -> dict[str, list[PregaoFator]]:
+    """Series com as melhores ofertas (V16), por codigo canonico. Sem as
+    colunas ainda, vazio: o custo fica no piso para todos."""
+    if "melhor_oferta_compra" not in repositorio.colunas(db, "cotacao_b3_diaria"):
+        return {}
+    universo = {identidades.get(c, (c, True))[0] for c in codigos}
+    return emendar(repositorio.series(db, codigos), identidades, universo)
 
 
 def aplicar(amostras: list[Amostra], regras: dict[str, Callable[[Amostra], str]]) -> list[Avaliacao]:
@@ -424,8 +484,9 @@ class Backtest:
             "limiares_v1": LIMIARES_ATUAIS.como_dict(),
             "frequencia": "primeiro pregao de cada mes",
             "horizontes_pregoes": list(self._horizontes),
-            "custo_ida_e_volta": str(CUSTO_IDA_E_VOLTA_PADRAO),
-            "fonte_preco": "B3 COTAHIST (bruto) + proventos de provento_distribuido (janela movel de ~12 meses por coleta)",
+            "custo_ida_e_volta": f"spread mediano de 63 pregoes por papel, piso {CUSTO_IDA_E_VOLTA_PADRAO}",
+            "fonte_preco": "B3 COTAHIST ajustado por evento_corporativo; valuation no preco bruto do dia",
+            "fonte_proventos": "provento_distribuido (B3) e, antes dele, DVA da CVM repartida pelas datas ex",
             "fonte_lucro": "CVM pela DT_RECEB; v1 atual: min(LPA recente, media de 3-5 anuais)",
             "fonte_juros": "v1: Selic meta vigente (DEC-02); v2: CDI anualizado",
             "ativos": sorted({a.simbolo for a in amostras}),
