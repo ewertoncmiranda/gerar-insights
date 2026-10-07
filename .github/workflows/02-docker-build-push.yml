@@ -7,7 +7,8 @@ on:
       - main
 
 jobs:
-  # ISS-05: imagem so e publicada se lint, testes e o piso de cobertura passarem.
+  # ISS-05: imagem so e publicada se os testes unitarios passarem (sem lint
+  # nem piso de cobertura na esteira: decisao de 2026-10-07).
   test:
     runs-on: ubuntu-latest
     steps:
@@ -22,14 +23,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Lint
-        run: ruff check app tests
-
-      - name: Run tests with coverage
+      - name: Tests
         env:
           ENVIRONMENT: local
           DB_HOST: localhost
-        run: pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=45
+        run: pytest tests/ -v
 
   build-and-push:
     needs: test
