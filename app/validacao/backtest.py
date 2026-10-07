@@ -47,9 +47,12 @@ from app.core.analysis.limiares import LIMIARES_ATUAIS, Limiares
 from app.core.analysis.market_snapshot import MarketSnapshot
 from app.core.analysis.recommendation import RecommendationPolicy
 from app.core.analysis.regra_v2 import VERSAO_REGRA_V2, EntradaV2, posicao_no_range, recomendar_v2
+from app.core.analysis.technical_series import TechnicalSeriesAnalyzer
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
 from app.core.analysis.valuation import TAXA_REFERENCIA_GRAHAM, ValuationAnalyzer
 from app.core.analysis.versao_regra import VERSAO_REGRA
+from app.core.strategies.mean_reversion_strategy import MeanReversionStrategy
+from app.core.strategies.momentum_strategy import MomentumStrategy
 from app.fatores.ajuste_preco import ajustar, fator_acumulado
 from app.fatores.fonte_proventos import FonteProventos
 from app.fatores.preco import PREGOES_TRIMESTRE, PregaoFator, spread_mediano
@@ -83,6 +86,7 @@ class Vela:
     maxima: Decimal
     minima: Decimal
     fechamento: Decimal
+    volume: Decimal | None = None
 
 
 @dataclass
@@ -103,6 +107,8 @@ class Amostra:
     selic: float | None
     juros_cdi: float | None
     ipca_12m: float | None
+    sinal_momentum: str | None = None
+    sinal_reversao: str | None = None
     resultados: dict[int, ResultadoHorizonte] = field(default_factory=dict)
 
 
@@ -123,7 +129,7 @@ def montar_series(linhas, identidades: dict[str, tuple[str, bool]], universo: se
     """Serie por codigo CANONICO, emendando codigos antigos do mesmo papel
     (ELET3 ate a troca, AXIA3 depois). Em data repetida, o canonico vence."""
     por_ativo: dict[str, dict[date, tuple[bool, Vela]]] = defaultdict(dict)
-    for simbolo, dia, abertura, maxima, minima, fechamento in linhas:
+    for simbolo, dia, abertura, maxima, minima, fechamento, volume in linhas:
         canonico, continuo = identidades.get(simbolo, (simbolo, True))
         if canonico not in universo or not continuo or not abertura or not fechamento:
             continue
@@ -131,7 +137,14 @@ def montar_series(linhas, identidades: dict[str, tuple[str, bool]], universo: se
         atual = por_ativo[canonico].get(dia)
         if atual and atual[0] and not e_canonico:
             continue
-        vela = Vela(dia, Decimal(str(abertura)), Decimal(str(maxima)), Decimal(str(minima)), Decimal(str(fechamento)))
+        vela = Vela(
+            dia,
+            Decimal(str(abertura)),
+            Decimal(str(maxima)),
+            Decimal(str(minima)),
+            Decimal(str(fechamento)),
+            Decimal(str(volume)) if volume is not None else None,
+        )
         por_ativo[canonico][dia] = (e_canonico, vela)
     return {s: [v for _, v in sorted(d.values(), key=lambda x: x[1].data)] for s, d in por_ativo.items()}
 
@@ -203,14 +216,72 @@ def regra_v2(a: Amostra) -> str:
     ).recomendacao
 
 
+VERSAO_MOMENTUM = "TECNICO_MOMENTUM_2026.10.07-1"
+VERSAO_REVERSAO = "TECNICO_REVERSAO_2026.10.07-1"
+
+
+def regra_momentum(a: Amostra) -> str:
+    return a.sinal_momentum or "SEM_DADOS"
+
+
+def regra_reversao(a: Amostra) -> str:
+    return a.sinal_reversao or "SEM_DADOS"
+
+
 REGRAS: dict[str, Callable[[Amostra], str]] = {
     VERSAO_V1_ANTIGA: regra_v1_antiga,
     VERSAO_REGRA: regra_v1_atual,
     VERSAO_REGRA_V2: regra_v2,
+    VERSAO_MOMENTUM: regra_momentum,
+    VERSAO_REVERSAO: regra_reversao,
 }
 
 
 # --- amostras ----------------------------------------------------------------
+
+
+def sinais_tecnicos_da_janela(velas: list[Vela], janela_minima: int = 20) -> dict[str, str | None]:
+    """Classifica momentum e reversão no fechamento do dia da amostra.
+
+    Usa somente candles até o dia do sinal (inclusive): é o mesmo dado
+    disponível depois do fechamento, antes da entrada na abertura seguinte.
+    Os sinais entram como regras próprias no placar (TASK-52), nunca como
+    voto dentro da recomendação de valuation.
+    """
+    if len(velas) < janela_minima:
+        return {"sinal_momentum": None, "sinal_reversao": None}
+    recentes = velas[-janela_minima:]
+    closes = [float(v.fechamento) for v in recentes if v.fechamento is not None]
+    volumes = [float(v.volume) for v in recentes if v.volume is not None]
+    metricas = TechnicalSeriesAnalyzer().analyze(closes, volumes)
+    if metricas is None:
+        return {"sinal_momentum": None, "sinal_reversao": None}
+
+    atual = float(recentes[-1].fechamento)
+    volume_score = metricas["score_volume"] if metricas["score_volume"] is not None else 0.0
+    minima_52s = float(min(v.minima for v in velas))
+    maxima_52s = float(max(v.maxima for v in velas))
+
+    momentum = MomentumStrategy()
+    reversao = MeanReversionStrategy()
+    return {
+        "sinal_momentum": _classificar_sinal(
+            momentum.should_buy(atual, metricas["media_movel"], volume_score),
+            momentum.should_sell(atual, metricas["media_movel"], volume_score),
+        ),
+        "sinal_reversao": _classificar_sinal(
+            reversao.should_buy(atual, metricas["z_score_fechamento"], minima_52s),
+            reversao.should_sell(atual, metricas["z_score_fechamento"], maxima_52s),
+        ),
+    }
+
+
+def _classificar_sinal(comprar: bool, vender: bool) -> str:
+    if comprar:
+        return "COMPRA_TECNICA"
+    if vender:
+        return "VENDA_TECNICA"
+    return "NEUTRO_TECNICO"
 
 
 def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES) -> tuple[list[Amostra], list[str], int]:
@@ -233,7 +304,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
     codigos = universo | {s for s, (c, continuo) in identidades.items() if c in universo and continuo}
     linhas = db.execute(
         text(
-            "SELECT simbolo, data_pregao, abertura, maxima, minima, fechamento FROM cotacao_b3_diaria "
+            "SELECT simbolo, data_pregao, abertura, maxima, minima, fechamento, volume FROM cotacao_b3_diaria "
             "WHERE simbolo IN :codigos ORDER BY data_pregao"
         ).bindparams(bindparam("codigos", expanding=True)),
         {"codigos": sorted(codigos)},
@@ -318,6 +389,7 @@ def montar_amostras(db, inicio: date, corte: date, horizontes=HORIZONTES_PREGOES
                 lpa_anual=lpa_anual, lpa_recente=lpa_recente, fonte_lpa_recente=fonte,
                 lpas_anuais=lpas_anuais, vpa=vpa, selic=dados.selic_em(dia), juros_cdi=dados.juros_em(dia),
                 ipca_12m=dados.ipca_12m_em(dia),
+                **sinais_tecnicos_da_janela(velas[max(0, i - PREGOES_52_SEMANAS + 1) : i + 1]),
             )
             custo = custo_pelo_spread(spreads.get(simbolo, []), dia)
             for horizonte in horizontes:
@@ -480,7 +552,7 @@ class Backtest:
         dias = [a.dia for a in amostras]
         parametros = {
             # A primeira e a oficial, a segunda a sombra, a terceira a referencia antiga.
-            "versoes": [VERSAO_REGRA, VERSAO_REGRA_V2, VERSAO_V1_ANTIGA],
+            "versoes": [VERSAO_REGRA, VERSAO_REGRA_V2, VERSAO_V1_ANTIGA, VERSAO_MOMENTUM, VERSAO_REVERSAO],
             "limiares_v1": LIMIARES_ATUAIS.como_dict(),
             "frequencia": "primeiro pregao de cada mes",
             "horizontes_pregoes": list(self._horizontes),
