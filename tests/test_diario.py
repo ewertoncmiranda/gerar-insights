@@ -63,7 +63,7 @@ class _RepoFake:
     def cdi_diario(self, db, desde):
         return {d: v for d, v in self.cdi.items() if d >= desde}
 
-    def proventos_por_emissor(self, db):
+    def proventos_por_papel(self, db):
         return {}
 
     # --- insights

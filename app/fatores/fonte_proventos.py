@@ -15,13 +15,13 @@ from sqlalchemy import text
 
 from app.fatores.proventos_contabeis import combinar, eventos_por_data
 from app.fatores.repositorio import RepositorioFatores
-from app.validacao.proventos import agrupar_por_emissor_e_data, codigo_emissor
+from app.validacao.proventos import agrupar_por_papel_e_data
 
 
 class FonteProventos:
-    def __init__(self, b3_por_emissor: dict[str, dict[date, Decimal]], dva_por_cnpj: dict, datas_ex: dict[str, list[date]],
+    def __init__(self, b3_por_papel: dict[str, dict[date, Decimal]], dva_por_cnpj: dict, datas_ex: dict[str, list[date]],
                  cnpj_de: dict[str, str]):
-        self._b3 = b3_por_emissor
+        self._b3 = b3_por_papel
         self._dva = dva_por_cnpj
         self._datas_ex = datas_ex
         self._cnpj = cnpj_de
@@ -30,15 +30,19 @@ class FonteProventos:
     @classmethod
     def carregar(cls, db, repositorio: RepositorioFatores | None = None) -> "FonteProventos":
         repositorio = repositorio or RepositorioFatores()
-        b3 = agrupar_por_emissor_e_data(
-            db.execute(text("SELECT simbolo, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido")).all()
+        cnpj_de = repositorio.cnpj_por_simbolo(db)
+        b3 = agrupar_por_papel_e_data(
+            db.execute(text(
+                "SELECT simbolo, isin, tipo, ultima_data_com_direito, valor_por_acao FROM provento_distribuido"
+            )).all(),
+            repositorio.isin_por_simbolo(db),
         )
         return cls(b3, repositorio.proventos_contabeis(db), repositorio.datas_ex_de_provento(db),
-                   repositorio.cnpj_por_simbolo(db))
+                   cnpj_de)
 
     def do_papel(self, simbolo: str) -> dict[date, Decimal]:
         if simbolo not in self._cache:
-            b3 = self._b3.get(codigo_emissor(simbolo), {})
+            b3 = self._b3.get(simbolo, {})
             registros = self._dva.get(self._cnpj.get(simbolo, ""), [])
             dva = eventos_por_data(registros, self._datas_ex.get(simbolo, []), min(b3) if b3 else None)
             self._cache[simbolo] = combinar(dva, b3)
