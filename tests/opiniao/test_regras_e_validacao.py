@@ -92,7 +92,7 @@ def _dossie_medio():
 
 def _resposta(**extra):
     base = {"opiniao": NEGATIVO, "risco": RISCO_ALTO,
-            "justificativa": [{"evidencia_id": "regra_v1", "leitura": "A regra v1 aponta VENDA_VALUATION."}],
+            "justificativa": [{"evidencia_id": "regra_v1", "leitura": "O sinal determinístico aponta VENDA_VALUATION."}],
             "o_que_invalida": ["Revisão forte do lucro projetado."]}
     base.update(extra)
     return base
