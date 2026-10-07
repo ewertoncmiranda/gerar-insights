@@ -64,6 +64,10 @@ class Settings:
         self._normalize_local_database_host()
         self.database_url = self._build_database_url()
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
+        default_ollama_url = 'http://ollama:11434' if self.is_docker else 'http://localhost:11434'
+        self.ollama_url = os.getenv('OLLAMA_URL', default_ollama_url)
+        self.ollama_modelo = os.getenv('OLLAMA_MODELO', 'qwen2.5:1.5b-instruct')
+        self.ollama_timeout_s = _get_int('OLLAMA_TIMEOUT_S', 180)
 
     def _normalize_local_database_host(self):
         if self.is_docker:
