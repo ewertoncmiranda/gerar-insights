@@ -29,10 +29,13 @@ NOME_DO_HORIZONTE = {21: "curto (cerca de 1 mês, 21 pregões)",
                      126: "longo (cerca de 6 meses, 126 pregões)"}
 
 PALAVRAS_PROIBIDAS = ("garantido", "garantida", "certeza", "sem risco", "não tem como perder",
-                      "imperdível", "compre", "venda agora", "vai subir", "vai cair")
+                      "imperdível", "compre", "venda agora", "vai subir", "vai cair",
+                      "bom investimento", "boa oportunidade", "oportunidade de")
 
-LIMITE_LEITURA = 240
-LIMITE_INVALIDA = 200
+LIMITE_LEITURA = 200
+LIMITE_INVALIDA = 160
+MAXIMO_DE_EVIDENCIAS_NO_PEDIDO = 8
+MINIMO_DE_PALAVRAS_INVALIDA = 3
 
 SCHEMA_DA_RESPOSTA = {
     "type": "object",
@@ -59,15 +62,19 @@ SISTEMA = (
     "1. Use somente as evidências recebidas. Não use conhecimento próprio, notícias nem preços de memória.\n"
     "2. Escolha 'opiniao' somente entre as 'permitidas'. Na dúvida, prefira SINAL_NEUTRO ou SEM_BASE.\n"
     "3. Copie 'risco' exatamente como 'risco_calculado'.\n"
-    "4. Cada item de 'justificativa' cita um 'evidencia_id' recebido e explica em uma frase curta "
-    "o que ele indica. Não invente números: use só os que aparecem nas evidências.\n"
-    "5. 'o_que_invalida' lista até 3 condições, em frases curtas, que tornariam a leitura errada.\n"
+    "4. Cada item de 'justificativa' cita um 'evidencia_id' recebido e explica, em UMA frase de até 20 "
+    "palavras, o que ele indica. Descreva o dado; não aconselhe nem diga se algo é bom para investir. "
+    "Não invente números: use só os que aparecem nas evidências.\n"
+    "5. 'o_que_invalida' lista até 3 frases curtas (mais de 3 palavras cada), escritas por você, sobre o "
+    "que tornaria a leitura errada. Não repita ids.\n"
     "6. Nunca prometa resultado. Palavras como 'garantido', 'certeza' e 'sem risco' são proibidas."
 )
 
 
 def montar_pedido(simbolo: str, dossie: DossieDeHorizonte) -> str:
     """Mensagem do usuario: so dados do dossie, em JSON fechado."""
+    # Prompt curto: direcionais primeiro (quanto menor o pedido, mais rapido e menos divagacao).
+    ordenadas = sorted(dossie.evidencias, key=lambda e: (e.direcao == 0, e.id))
     corpo = {
         "ativo": simbolo,
         "horizonte": NOME_DO_HORIZONTE[dossie.pregoes],
@@ -76,7 +83,7 @@ def montar_pedido(simbolo: str, dossie: DossieDeHorizonte) -> str:
         "evidencias": [
             {"evidencia_id": e.id, "o_que_e": e.rotulo, "valor": e.valor,
              "leitura_numerica": {1: "favorável", -1: "desfavorável", 0: "informativa"}[e.direcao]}
-            for e in dossie.evidencias
+            for e in ordenadas[:MAXIMO_DE_EVIDENCIAS_NO_PEDIDO]
         ],
     }
     return json.dumps(corpo, ensure_ascii=False)
@@ -142,6 +149,8 @@ def validar(resposta: object, dossie: DossieDeHorizonte) -> tuple[dict | None, l
         erros.append(f"vocabulário proibido: {achadas}")
     if len(invalida) > 3 or any(len(i) > LIMITE_INVALIDA for i in invalida):
         erros.append("o_que_invalida: máximo 3 itens curtos")
+    if any(len(i.split()) < MINIMO_DE_PALAVRAS_INVALIDA for i in invalida):
+        erros.append("o_que_invalida deve ter frases, não ids")
     if erros:
         return None, erros
     return {
@@ -178,11 +187,12 @@ class ErroDoProvedor(RuntimeError):
 class OllamaProvedor:
     """Ollama via /api/chat com saida estruturada (`format` = JSON Schema) e temperatura 0."""
 
-    def __init__(self, url: str, modelo: str, timeout_s: int = 180, semente: int = 7, num_ctx: int = 4096):
+    def __init__(self, url: str, modelo: str, timeout_s: int = 180, semente: int = 7, num_ctx: int = 2048,
+                 max_tokens: int = 700):
         self._url = url.rstrip("/")
         self.nome = modelo
         self._timeout = timeout_s
-        self._opcoes = {"temperature": 0, "seed": semente, "num_ctx": num_ctx}
+        self._opcoes = {"temperature": 0, "seed": semente, "num_ctx": num_ctx, "num_predict": max_tokens}
 
     def gerar(self, sistema: str, usuario: str, schema: dict) -> str:
         corpo = json.dumps({
