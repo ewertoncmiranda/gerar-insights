@@ -175,3 +175,14 @@ def test_janelas_sucessivas_e_promocao():
     ruins = [ranking.MesRanking(m.data_referencia, 63, -0.05, [(1, 0.02, 10), (5, 0.0, 10)], 50) for m in bons]
     decisao = ranking.decidir_promocao(ruins, 63, 3, -0.01, None)
     assert not decisao.promover and len(decisao.motivos) >= 2
+
+
+def test_anterior_ao_exercicio_que_fecha_em_fevereiro():
+    # CAML3: 29/02/2020 nao existe em 2019; 28/02/2021 casa com 29/02/2020
+    b2019 = qualidade.Balanco(date(2019, 2, 28), "ANUAL", date(2019, 5, 1))
+    b2020 = qualidade.Balanco(date(2020, 2, 29), "ANUAL", date(2020, 5, 1))
+    b2021 = qualidade.Balanco(date(2021, 2, 28), "ANUAL", date(2021, 5, 1))
+    balancos = [b2019, b2020, b2021]
+
+    assert qualidade.anterior_ao(balancos, b2020, date(2021, 1, 1)) is b2019
+    assert qualidade.anterior_ao(balancos, b2021, date(2022, 1, 1)) is b2020
