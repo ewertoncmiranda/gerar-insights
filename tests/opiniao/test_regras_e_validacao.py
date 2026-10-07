@@ -188,3 +188,36 @@ class TestRespostaDeRegra:
     def test_sem_base_nao_inventa_direcao(self):
         dossie, _ = montar_dossie(_insight(), [], 0, HOJE)
         assert resposta_de_regra(dossie[CURTO])["opiniao"] == SEM_BASE
+
+
+class TestPontosApontadosNaRevisao:
+    def test_regra_positiva_nao_justifica_com_evidencia_contraria(self):
+        # PETR4 em 2026-10-06: opiniao positiva no curto prazo com a reversao a media tecnica negativa.
+        detalhes = _insight(momentum="COMPRA_TECNICA")
+        detalhes["contexto_tecnico_serie"]["sinal_reversao"] = "VENDA_TECNICA"
+        fatores = [_fator("MOMENTO_12_1", "PRECO", 0.95), _fator("DRAWDOWN_12M", "PRECO", 0.9),
+                   _fator("BETA_12M", "PRECO", 0.1, direcao=-1)]
+        dossie, _ = montar_dossie(detalhes, fatores, 0, HOJE)
+        d = dossie[CURTO]
+        assert d.permitidas[0] == POSITIVO
+        resposta = resposta_de_regra(d)
+        por_id = {e.id: e for e in d.evidencias}
+        assert all(por_id[j["evidencia_id"]].direcao > 0 for j in resposta["justificativa"])
+        assert any("sentido contrário" in i and "reversão" in i.lower() for i in resposta["o_que_invalida"])
+        # o texto "em sentido contrario" repete a evidencia de proposito: nao passa pelo validador do modelo
+        assert validar({**resposta, "o_que_invalida": []}, d)[1] == []
+
+    def test_justificativa_com_mais_de_cinco_itens_e_rejeitada(self):
+        d = _dossie_medio()
+        itens = [{"evidencia_id": e.id, "leitura": f"{e.rotulo}."} for e in d.evidencias][:6]
+        assert len(itens) == 6
+        _, erros = validar(_resposta(justificativa=itens), d)
+        assert any("no máximo 5" in e for e in erros)
+
+    def test_o_que_invalida_que_repete_evidencia_e_rejeitado(self):
+        d = _dossie_medio()
+        repetida = f"{d.evidencias[0].rotulo}: {d.evidencias[0].valor}"
+        _, erros = validar(_resposta(o_que_invalida=[repetida]), d)
+        assert any("repete uma evidência" in e for e in erros)
+        _, erros = validar(_resposta(o_que_invalida=["fator_accruals e fator_beta_12m"]), d)
+        assert erros  # ids soltos nao passam (frase curta ou repeticao)
