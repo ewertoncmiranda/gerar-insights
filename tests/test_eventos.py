@@ -27,6 +27,19 @@ def test_enum_compartilhado_rejeita_recomendacao_inventada():
         validar_insight({"schemaVersion": "2.1", "versao_payload": "2.1", "resumo": {"recomendacao": "COMPRAR_TUDO"}})
 
 
+def test_contrato_aceita_v2_durante_transicao_e_exige_disclaimer_no_v3():
+    validar_insight({"schemaVersion": "2.1", "versao_payload": "2.1", "resumo": {"recomendacao": "MANTER"}})
+    with pytest.raises(ValidationError):
+        validar_insight({
+            "schemaVersion": "3.0", "versao_payload": "3.0",
+            "resumo": {"sinal_quantitativo": "NEUTRO", "recomendacao": "NEUTRO"},
+        })
+    validar_insight({
+        "schemaVersion": "3.0", "versao_payload": "3.0", "aviso_legal": "Nao e recomendacao.",
+        "resumo": {"sinal_quantitativo": "NEUTRO", "recomendacao": "NEUTRO"},
+    })
+
+
 def test_serie_legada_ignora_metadados_de_transporte():
     serie = {"results": [{"symbol": "PETR4", "data": {"historicalDataPrice": [{"date": 1, "close": 30}]}}]}
     a = preparar_evento("series_historicas", {**serie, "took": 1})

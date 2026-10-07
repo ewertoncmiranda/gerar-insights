@@ -43,6 +43,8 @@ def test_sem_selic_o_insight_sai_sem_dados_em_vez_de_cair_na_formula_antiga():
     )
     assert resultado["recomendacao"] == "SEM_DADOS"
     assert "Selic" in resultado["detalhes_json"]["aviso"]
+    assert resultado["detalhes_json"]["versao_payload"] == "3.0"
+    assert "nao recomendacao" in resultado["detalhes_json"]["aviso_legal"]
 
 
 def test_ciclica_no_pico_nao_sai_compra_forte_com_o_lucro_normalizado():

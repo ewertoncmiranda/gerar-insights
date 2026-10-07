@@ -2,7 +2,8 @@ from logging import Logger
 
 from sqlalchemy.orm import Session
 
-from app.core.analysis.insight_payload import InsightPayloadBuilder
+from app.core.analysis.insight_payload import AVISO_LEGAL, VERSAO_PAYLOAD, InsightPayloadBuilder
+from app.contracts.sinal_quantitativo import como_sinal_quantitativo
 from app.core.analysis.market_snapshot import MarketSnapshot
 from app.core.analysis.recommendation import RecommendationPolicy
 from app.core.analysis.technical_context import TechnicalContextAnalyzer
@@ -72,13 +73,16 @@ class FinancialAnalyzerService:
         sinal_tecnico = self.serie_tecnica_service.avaliar(db, snapshot)
         details = self.payload_builder.build(snapshot, valuation, technical_context, recommendation, sinal_tecnico)
         base_scenario = valuation["cenario_base"]
+        sinal = como_sinal_quantitativo(recommendation["recomendacao"])
 
         return {
             "dedup_key": ativo.get("dedupKey"),
             "simbolo": snapshot.symbol,
             "preco_justo_graham": base_scenario["preco_justo"],
             "margem_seguranca_percent": base_scenario["margem_seguranca_percent"],
-            "recomendacao": recommendation["recomendacao"],
+            # Coluna legada mantida para compatibilidade física; desde o payload
+            # v3 ela armazena a nomenclatura pública de sinal quantitativo.
+            "recomendacao": sinal,
             "detalhes_json": details,
         }
 
@@ -95,9 +99,10 @@ class FinancialAnalyzerService:
             "margem_seguranca_percent": None,
             "recomendacao": "SEM_DADOS",
             "detalhes_json": {
-                "schemaVersion": "2.1",
-                "versao_payload": "2.1",
-                "resumo": {"recomendacao": "SEM_DADOS"},
+                "schemaVersion": VERSAO_PAYLOAD,
+                "versao_payload": VERSAO_PAYLOAD,
+                "resumo": {"sinal_quantitativo": "SEM_DADOS", "recomendacao": "SEM_DADOS"},
+                "aviso_legal": AVISO_LEGAL,
                 "aviso": aviso,
             },
         }

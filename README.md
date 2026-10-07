@@ -12,7 +12,7 @@ Aplicacao Python responsavel por ser o cerebro analitico do ecossistema. Operand
 
 1. Consumo Robusto (SQS) - Le mensagens de duas filas (cotacoes e series historicas) sem gargalos, processa e apaga de forma eficiente.
 2. Historico Bruto - Armazena snapshots de mercado diarios dos ativos na tabela historico_acoes e os candles OHLCV na tabela serie_historica.
-3. Calculo de Insights - Aplica calculos financeiros (Preco Justo Benjamin Graham, Margem de Seguranca) e sinal tecnico (media movel, z-score, score de volume via Momentum/Mean Reversion) e emite recomendacoes (COMPRA/VENDA/NEUTRO).
+3. Calculo de Insights - Aplica calculos financeiros (Preco Justo Benjamin Graham, Margem de Seguranca) e sinal tecnico (media movel, z-score, score de volume via Momentum/Mean Reversion) e emite sinais quantitativos para estudo, sempre com aviso legal; nao emite recomendacao de investimento.
 
 ## TECNOLOGIAS E LIBS
 
