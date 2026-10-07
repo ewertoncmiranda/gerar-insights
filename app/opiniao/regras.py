@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-VERSAO_PROMPT = "1.0"
+VERSAO_PROMPT = "1.1"
 
 CURTO, MEDIO, LONGO = 21, 63, 126
 HORIZONTES: tuple[int, ...] = (CURTO, MEDIO, LONGO)
@@ -77,11 +77,11 @@ def evidencias_do_insight(detalhes: dict) -> list[Evidencia]:
     valuation = detalhes.get("valuation") or {}
     tecnico = detalhes.get("contexto_tecnico_serie") or {}
 
-    recomendacao = resumo.get("recomendacao")
+    recomendacao = resumo.get("sinal_quantitativo") or resumo.get("recomendacao")
     if recomendacao and recomendacao != "SEM_DADOS":
-        direcao = 1 if str(recomendacao).startswith("COMPRA") else (
-            -1 if str(recomendacao) in ("VENDA_VALUATION", "ALERTA_RISCO") else 0)
-        saida.append(Evidencia("regra_v1", "Regra determinística v1 (valuation)", str(recomendacao),
+        direcao = 1 if str(recomendacao).startswith(("COMPRA", "SINAL_POSITIVO")) else (
+            -1 if str(recomendacao) == "VENDA_VALUATION" else 0)
+        saida.append(Evidencia("regra_v1", "Sinal quantitativo determinístico (valuation)", str(recomendacao),
                                direcao, (MEDIO, LONGO), "insight"))
 
     base = (valuation.get("cenarios_graham") or {}).get("base") or {}

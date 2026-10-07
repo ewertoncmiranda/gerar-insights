@@ -1,6 +1,6 @@
 from app.core.analysis.market_snapshot import MarketSnapshot
 from app.core.analysis.versao_regra import VERSAO_REGRA
-from app.contracts.recomendacao import Recomendacao
+from app.contracts.sinal_quantitativo import como_sinal_quantitativo
 
 # Recomendar compra ou venda a terceiros e atividade de analista credenciado
 # (CVM Res. 20/2021): todo insight sai com o aviso, para quem quer que o exiba.
@@ -8,6 +8,7 @@ AVISO_LEGAL = (
     "Sinal quantitativo gerado por regras automaticas para estudo, nao recomendacao de "
     "investimento. Nao considera sua situacao, impostos nem custos; decisoes sao suas."
 )
+VERSAO_PAYLOAD = "3.0"
 
 
 class InsightPayloadBuilder:
@@ -22,14 +23,18 @@ class InsightPayloadBuilder:
         context_payload = dict(technical_context)
         context_payload.pop("_raw", None)
 
+        sinal = como_sinal_quantitativo(recommendation["recomendacao"])
         payload = {
-            "schemaVersion": "2.1",
-            "versao_payload": "2.1",
+            "schemaVersion": VERSAO_PAYLOAD,
+            "versao_payload": VERSAO_PAYLOAD,
             # Qual regra produziu este insight; o diario de sinais agrupa por ela.
             "versao_regra": VERSAO_REGRA,
             "aviso_legal": AVISO_LEGAL,
             "resumo": {
-                "recomendacao": Recomendacao(recommendation["recomendacao"]).value,
+                "sinal_quantitativo": sinal,
+                # Alias temporario para consumidores v2: o nome do campo e
+                # preservado, mas o valor ja usa a linguagem neutra do v3.
+                "recomendacao": sinal,
                 "nivel_risco": recommendation["nivel_risco"],
                 "confianca_score": recommendation["confianca_score"],
                 "cenario_referencia": "base",

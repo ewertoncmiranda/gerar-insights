@@ -56,6 +56,11 @@ VENDA = -1
 SEM_DIRECAO = 0
 
 _DIRECAO = {
+    # Contrato v3.
+    "SINAL_POSITIVO_FORTE": COMPRA,
+    "SINAL_POSITIVO": COMPRA,
+    "SEM_MARGEM": SEM_DIRECAO,
+    # Histórico v2.x, mantido para reprocessamento e comparação.
     "COMPRA_FORTE": COMPRA,
     "COMPRA_MODERADA": COMPRA,
     "COMPRA_TECNICA": COMPRA,
@@ -65,10 +70,11 @@ _DIRECAO = {
 
 
 def direcao(recomendacao: str | None) -> int:
-    """COMPRA_* aposta em alta, VENDA_* em queda; MANTER e ALERTA nao apostam.
+    """Sinais positivos têm direção de alta; SEM_MARGEM não aposta em queda.
 
-    Sinal sem direcao ainda e avaliado (retorno e excesso), so nao tem
-    "acerto": seria inventar uma aposta que a regra nao fez.
+    Os rótulos COMPRA/VENDA antigos continuam legíveis apenas para o histórico.
+    Sinal sem direção ainda é avaliado (retorno e excesso), só não tem
+    "acerto": seria inventar uma aposta que a regra não fez.
     """
     return _DIRECAO.get(recomendacao or "", SEM_DIRECAO)
 
@@ -207,8 +213,12 @@ def _media_da_carteira(
             continue
         if not janela[0].abertura or _tem_salto_suspeito(janela):
             continue
-        # por_papel: mapa ja por codigo (backtest, LAC-INS-1); senao, por emissor (diario).
-        chave = simbolo if por_papel else codigo_emissor(simbolo)
+        # por_papel: mapa ja por codigo (backtest e diario com ISIN, LAC-INS-1/47);
+        # senao, aceita fallback historico por emissor em bases antigas.
+        if por_papel or simbolo in (proventos_carteira or {}):
+            chave = simbolo
+        else:
+            chave = codigo_emissor(simbolo)
         eventos = (proventos_carteira or {}).get(chave, {})
         soma = _proventos_no_periodo(eventos, data_entrada, data_saida)
         retornos.append((janela[-1].fechamento + soma) / janela[0].abertura - 1)
