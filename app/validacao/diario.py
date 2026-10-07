@@ -29,7 +29,6 @@ from logging import Logger
 
 from app.core.analysis.regra_v2 import VERSAO_REGRA_V2, EntradaV2, posicao_no_range, recomendar_v2
 from app.validacao.avaliador import HORIZONTES_PREGOES, avaliar
-from app.validacao.proventos import codigo_emissor
 
 # B3 em horario de Brasilia (UTC-3, sem horario de verao desde 2019); o banco
 # grava data_analise em UTC. Abertura do pregao a vista: 10h.
@@ -203,7 +202,7 @@ class DiarioDeSinais:
             # Uma consulta so: a mesma carteira serve de serie do proprio
             # sinal e de regua (media simples) para todos os sinais.
             carteira = self._repo.series_da_carteira(db, desde)
-            proventos_por_emissor = self._repo.proventos_por_emissor(db)
+            proventos_por_papel = self._repo.proventos_por_papel(db)
 
             for sinal in pendentes:
                 serie = carteira.get(sinal["simbolo"], [])
@@ -215,8 +214,9 @@ class DiarioDeSinais:
                     resultado = avaliar(
                         sinal["data_pregao"], sinal["recomendacao"], serie, horizonte,
                         carteira=carteira, cdi_diario=cdi,
-                        proventos=proventos_por_emissor.get(codigo_emissor(sinal["simbolo"]), {}),
-                        proventos_carteira=proventos_por_emissor,
+                        proventos=proventos_por_papel.get(sinal["simbolo"], {}),
+                        proventos_carteira=proventos_por_papel,
+                        media_carteira_pronta=None,
                     )
                     if resultado is None:
                         ainda_falta = True

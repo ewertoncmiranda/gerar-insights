@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 
 from app.fatores import ajuste_preco, evento, mercado, percentis, preco, proventos_contabeis, qualidade
-from app.validacao import ranking
+from app.validacao import proventos, ranking
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,24 @@ def test_sem_marca_ex_vale_a_entrega_e_b3_prevalece():
     assert proventos_contabeis.eventos_por_data(registros, [], inicio_fonte_b3=date(2025, 1, 1)) == {}
     combinado = proventos_contabeis.combinar({date(2025, 5, 10): Decimal("0.30")}, {date(2025, 5, 10): Decimal("0.31")})
     assert combinado[date(2025, 5, 10)] == Decimal("0.31")
+
+
+def test_provento_b3_usa_isin_da_classe_correta():
+    linhas = [
+        ("PETR", "BRPETRACNOR9", "DIVIDENDO", date(2026, 5, 2), Decimal("0.10")),
+        ("PETR", "BRPETRACNPR6", "DIVIDENDO", date(2026, 5, 2), Decimal("0.20")),
+    ]
+    por_papel = proventos.agrupar_por_papel_e_data(
+        linhas,
+        {"PETR3": "BRPETRACNOR9", "PETR4": "BRPETRACNPR6"},
+    )
+    assert por_papel["PETR3"][date(2026, 5, 2)] == Decimal("0.10")
+    assert por_papel["PETR4"][date(2026, 5, 2)] == Decimal("0.20")
+
+
+def test_provento_b3_sem_isin_mapeado_cai_para_emissor():
+    linhas = [("PETR", "ISIN_DESCONHECIDO", "DIVIDENDO", date(2026, 5, 2), Decimal("0.10"))]
+    assert proventos.agrupar_por_papel_e_data(linhas, {}) == {"PETR": {date(2026, 5, 2): Decimal("0.10")}}
 
 
 # --- LAC-INS-3: fatores de preco sem olhar o futuro ---------------------------

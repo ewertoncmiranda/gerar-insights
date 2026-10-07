@@ -82,6 +82,14 @@ class RepositorioFatores:
                 mapa.setdefault(s, c)
         return mapa
 
+    def isin_por_simbolo(self, db) -> dict[str, str]:
+        if "isin" not in self.colunas(db, "cvm_ticker"):
+            return {}
+        return {
+            simbolo: isin
+            for simbolo, isin in db.execute(text("SELECT simbolo, isin FROM cvm_ticker WHERE isin IS NOT NULL"))
+        }
+
     def proventos_contabeis(self, db) -> dict[str, list[ProventoContabil]]:
         if not self.existe(db, "provento_contabil"):
             return {}
