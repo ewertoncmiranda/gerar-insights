@@ -1,6 +1,10 @@
 from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, BigInteger, UniqueConstraint
 from app.config.database_config import Base
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def agora_utc():
+    return datetime.now(timezone.utc)
 
 
 class HistoricoAcaoEntity(Base):
@@ -11,7 +15,7 @@ class HistoricoAcaoEntity(Base):
     dedup_key = Column(String(64))
 
     simbolo = Column(String(10), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=agora_utc, nullable=False)
 
     preco_abertura = Column(DECIMAL(12, 4))
     preco_fechamento = Column(DECIMAL(12, 4))
@@ -27,4 +31,4 @@ class HistoricoAcaoEntity(Base):
     preco_lucro = Column(DECIMAL(10, 4))
     lucro_por_acao = Column(DECIMAL(10, 4))
 
-    criado_em = Column(DateTime, default=datetime.utcnow)
+    criado_em = Column(DateTime, default=agora_utc)

@@ -21,6 +21,10 @@ class ErroDoServicoIA(RuntimeError):
     pass
 
 
+class RotaNaoEncontrada(ErroDoServicoIA):
+    pass
+
+
 @dataclass(frozen=True)
 class Identidade:
     """Quem vai responder: o modelo de chat e a versao do conjunto de skills (`skills@<hash>`)."""
@@ -43,6 +47,22 @@ def pedido_do_dossie(simbolo: str, data_pregao: date, dossie: DossieDeHorizonte,
         "motivo_sem_base": dossie.motivo_sem_base,
         "dados_ausentes": list(dados_ausentes),
         "versao_regra": versao_regra,
+    }
+
+
+def pedido_do_ativo(simbolo: str, data_pregao: date, dossie: dict[int, DossieDeHorizonte],
+                    dados_ausentes: list[str], versao_regra: str, uso: str = "lote") -> dict:
+    """Corpo de `POST /opiniao/ativo` (CTR-IA-01 v1.1): uma chamada para os 3 horizontes."""
+    return {
+        "simbolo": simbolo,
+        "data_pregao": data_pregao.isoformat(),
+        "uso": uso,
+        "versao_regra": versao_regra,
+        "dados_ausentes": list(dados_ausentes),
+        "horizontes": [
+            pedido_do_dossie(simbolo, data_pregao, dossie[h], dados_ausentes, versao_regra)
+            for h in sorted(dossie)
+        ],
     }
 
 
@@ -69,6 +89,20 @@ class ServicoIA:
             raise ErroDoServicoIA(f"/opiniao sem os campos {faltando}")
         return resposta
 
+    def opinar_ativo(self, pedido: dict) -> dict:
+        """`POST /opiniao/ativo`; devolve itens por horizonte e cota do provedor."""
+        resposta = self._chamar("POST", "/opiniao/ativo", pedido, timeout=self._timeout)
+        itens = resposta.get("itens") or resposta.get("opinioes") or resposta.get("resultados")
+        if not isinstance(itens, list):
+            raise ErroDoServicoIA("/opiniao/ativo sem lista de itens")
+        for item in itens:
+            faltando = [c for c in ("horizonte_pregoes", "opiniao", "risco", "justificativa",
+                                    "o_que_invalida", "modelo", "origem") if c not in item]
+            if faltando:
+                raise ErroDoServicoIA(f"/opiniao/ativo item sem os campos {faltando}")
+        return {"itens": itens, "cota": resposta.get("cota") or {},
+                "skills_versao": resposta.get("skills_versao")}
+
     def _chamar(self, metodo: str, caminho: str, corpo: dict | None, timeout: int) -> dict:
         dados = None if corpo is None else json.dumps(corpo, ensure_ascii=False).encode("utf-8")
         pedido = urllib.request.Request(f"{self._url}{caminho}", data=dados, method=metodo,
@@ -78,6 +112,8 @@ class ServicoIA:
                 return json.loads(resposta.read())
         except urllib.error.HTTPError as erro:
             detalhe = erro.read().decode("utf-8", "replace")[:300]
+            if erro.code == 404:
+                raise RotaNaoEncontrada(f"{metodo} {caminho} -> HTTP 404: {detalhe}") from erro
             raise ErroDoServicoIA(f"{metodo} {caminho} -> HTTP {erro.code}: {detalhe}") from erro
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as erro:
             raise ErroDoServicoIA(f"servico de IA indisponivel em {self._url}: {erro}") from erro

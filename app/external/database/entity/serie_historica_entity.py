@@ -1,8 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Column, Date, DateTime, Integer, JSON, Numeric, String, UniqueConstraint
 
 from app.config.database_config import Base
+
+
+def agora_utc():
+    return datetime.now(timezone.utc)
 
 
 class SerieHistoricaEntity(Base):
@@ -26,5 +30,5 @@ class SerieHistoricaEntity(Base):
 
     fonte = Column(String(30), nullable=False, default="BRAPI")
     detalhes_json = Column(JSON)
-    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
-    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    criado_em = Column(DateTime, default=agora_utc, nullable=False)
+    atualizado_em = Column(DateTime, default=agora_utc, onupdate=agora_utc, nullable=False)
