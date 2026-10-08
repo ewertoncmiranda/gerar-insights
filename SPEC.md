@@ -601,3 +601,40 @@ Uma versão de regra só é promovida se, nas janelas de teste:
 | TASK-GEM-L4 | **Configuração e resumo.** `LOTE_MAX_GEMINI` (25) e `IA_TIMEOUT_S` (de 300 para 200) em `Settings`; log final do lote com `priorizados`, `chamadas`, `reaproveitadas`, `sem_cota`, `modelo`, `regra`, `falhas_do_servico`; flag `--sem-limite` para rodar todos (uso manual) | `app/config/settings.py`, `app/opiniao/gerar.py`, `tests/opiniao/test_gerar_lote.py` | L1..L3 | Linha de resumo com todos os campos; `--sem-limite` ignora o corte | IMPLEMENTADO (2026-10-08) |
 
 **Aceite do plano GEM no worker.** Rodando o lote de um pregão com o serviço no ar: no máximo `LOTE_MAX_GEMINI` requisições ao `ia-opiniao`; nenhuma requisição para ativo fora da fila; linhas `REGRA` iguais às de hoje para os demais (mesmo critério de TASK-IA-03); `pytest tests/opiniao -q` verde.
+
+---
+
+## Plano OPR: diário operacional simulado (2026-10-08)
+
+**Status:** PLANEJADO · **Contexto:** `infra-b3-ecossytem/SPEC.md`, Plano OPR. Este worker é o dono das regras operacionais simuladas: elegibilidade, entrada, tamanho de posição, saída, custos e diário. O resultado ainda é paper trading; não autoriza capital real.
+
+**Meta.** Converter sinais e fatores já existentes em operações simuladas auditáveis, com comparação líquida contra CDI. A saída principal é um diário de 3 a 6 meses que diga se o sistema está `NAO_OPERAVEL`, `EM_OBSERVACAO`, `PAPER_TRADING_ELEGIVEL` ou `BLOQUEADO`.
+
+### Tarefas desta aplicação
+
+| ID | Tarefa | Arquivos | Depende | Aceite | Status |
+|---|---|---|---|---|---|
+| OPR-INS-1 | **Elegibilidade operacional.** Criar módulo `app/operacional/elegibilidade.py` lendo liquidez do ETL: volume financeiro 63d, número de negócios 63d, buracos na série, status de ajuste de preço, fundamento point-in-time e eventos bloqueantes | `app/operacional/**`, `tests/operacional/**` | infra#OPR-INFRA-1; etl#OPR-ETL-1..4 | Ativo líquido passa; ativo ilíquido, sem fundamento vigente ou com salto sem evento é bloqueado com motivo estruturado | PLANEJADO |
+| OPR-INS-2 | **Sizing teórico.** Criar `risco.py` com capital teórico configurável, risco máximo por operação, exposição máxima por ativo/setor e redutor por volatilidade/liquidez | `app/operacional/risco.py`, `app/config/settings.py` | OPR-INS-1 | Para capital de R$ 100 mil, a posição nunca excede limites configurados e cai para zero quando elegibilidade falha | PLANEJADO |
+| OPR-INS-3 | **Regra de saída.** Criar `saida.py` com saída por mudança de sinal, stop por volatilidade/drawdown, prazo máximo da tese, perda de liquidez e evento relevante | `app/operacional/saida.py` | OPR-INS-1, OPR-INS-2 | Testes cobrem cada motivo de saída e prioridade quando mais de um motivo ocorre no mesmo pregão | PLANEJADO |
+| OPR-INS-4 | **Diário operacional.** Criar comando `python -m app.operacional.diario registrar|avaliar` para abrir/fechar operações simuladas, aplicar custos, calcular retorno bruto, retorno líquido, CDI, excesso e drawdown | `app/operacional/diario.py`, repositórios novos | infra#OPR-INFRA-1; OPR-INS-1..3 | Rodar duas vezes o mesmo pregão não duplica; operação fechada tem preço, custo, retorno líquido e motivo de saída | PLANEJADO |
+| OPR-INS-5 | **Custos e IR estimado.** Criar `custos.py` com custo fixo, slippage por spread/liquidez e imposto estimado separado do resultado pós-custos | `app/operacional/custos.py` | OPR-INS-4; etl#OPR-ETL-2 | Diário exibe `resultado_bruto`, `resultado_pos_custos` e `resultado_pos_imposto_estimado`; ausência de dado de spread usa fallback conservador | PLANEJADO |
+| OPR-INS-6 | **Trava de operabilidade.** Calcular status do sistema por janela: mínimo 63 pregões, retorno líquido > CDI, drawdown abaixo do limite, zero violação de liquidez e amostra mínima de operações encerradas | `app/operacional/status.py` | OPR-INS-4, OPR-INS-5 | Sistema começa `NAO_OPERAVEL`, vai para `EM_OBSERVACAO` durante coleta e só vira `PAPER_TRADING_ELEGIVEL` cumprindo todos os critérios | PLANEJADO |
+| OPR-INS-7 | **Eventos operacionais.** Publicar eventos `operacional.*.v1` após diário avaliado, posição aberta/fechada e alerta de risco, sem conhecer Telegram ou painel | mensageria existente | infra#OPR-INFRA-2; OPR-INS-4 | Payload passa nos JSON Schemas e contém `schemaVersion`, `eventId`, `correlationId`, `versao_regra` e `dataPregao` | PLANEJADO |
+
+### Configurações previstas
+
+| Setting | Padrão inicial |
+|---|---|
+| `OPERACIONAL_CAPITAL_TEORICO` | `100000` |
+| `OPERACIONAL_RISCO_POR_OPERACAO` | `0.005` |
+| `OPERACIONAL_EXPOSICAO_MAX_ATIVO` | `0.05` |
+| `OPERACIONAL_EXPOSICAO_MAX_SETOR` | `0.20` |
+| `OPERACIONAL_CUSTO_FIXO_BPS` | `10` |
+| `OPERACIONAL_MIN_PREGÕES` | `63` |
+
+### Aceite local
+
+- `pytest tests/operacional -q` cobre elegibilidade, sizing, saída, custos, idempotência e status.
+- Nenhuma regra operacional usa fundamento com `data_entrega` posterior ao pregão.
+- Toda decisão registra motivo legível de negócio e payload estruturado para o painel.
