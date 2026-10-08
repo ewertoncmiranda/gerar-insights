@@ -64,10 +64,11 @@ class Settings:
         self._normalize_local_database_host()
         self.database_url = self._build_database_url()
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
-        default_ollama_url = 'http://ollama:11434' if self.is_docker else 'http://localhost:11434'
-        self.ollama_url = os.getenv('OLLAMA_URL', default_ollama_url)
-        self.ollama_modelo = os.getenv('OLLAMA_MODELO', 'qwen2.5:1.5b-instruct')
-        self.ollama_timeout_s = _get_int('OLLAMA_TIMEOUT_S', 180)
+        # Servico de IA (insider-ia-b3-ecossytem, TASK-IA-03): o worker so fala HTTP com ele;
+        # modelo e prompt sao configuracao do servico, nao daqui.
+        default_ia_url = 'http://ia-opiniao:8000' if self.is_docker else 'http://localhost:8000'
+        self.ia_url = os.getenv('IA_URL', default_ia_url)
+        self.ia_timeout_s = _get_int('IA_TIMEOUT_S', 300)
 
     def _normalize_local_database_host(self):
         if self.is_docker:
