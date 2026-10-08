@@ -111,7 +111,7 @@ Estados válidos de requisitos, tarefas, problemas e decisões: `PLANEJADO`, `EM
 | `.github/workflows/` | CI: auto-PR `feature*` → `develop`; push em `develop` → build/push Docker Hub |
 
 ### 3.3 Stack
-Python 3.11 (imagem `python:3.11-slim`), boto3/botocore, SQLAlchemy ≥ 2, PyMySQL, python-dotenv, python-json-logger.
+Python 3.11 (imagem `python:3.11-slim`), boto3/botocore, SQLAlchemy ≥ 2, PyMySQL, python-dotenv, python-json-logger, prometheus-client.
 
 ### 3.4 Semântica de processamento de mensagens (`CoreProcessor._consumir_fila`)
 
@@ -139,6 +139,7 @@ Polling: `MaxNumberOfMessages=10`, `WaitTimeSeconds=2`, filas consumidas em sequ
 | `DB_USER` / `DB_PASS` / `DB_NAME` | `spring` / `spring123` / `minha_base` | idem |
 | `RETRY_ATTEMPTS` / `RETRY_DELAY` | `3` / `10` s | idem |
 | `LOG_LEVEL` | `INFO` | nível do logger JSON do worker |
+| `METRICS_ENABLED` / `METRICS_PORT` | `true` / `8080` | idem |
 | `DYNAMO_ENDPOINT` / `DYNAMO_TABLE_NAME` | mencionadas; DynamoDB **não é usado** | — |
 
 Regra especial: em ambiente local, se `DB_HOST=mysql`, ele vira `localhost` e a porta 3306 vira 3305.
@@ -308,7 +309,7 @@ Critérios de aceite de referência (devem virar testes):
 | NFR-01 | **Atomicidade:** todas as escritas de uma mensagem ficam em uma única transação | IMPLEMENTADO (2026-09-26) |
 | NFR-02 | **Idempotência:** reprocessar a mesma mensagem não gera duplicatas | IMPLEMENTADO por `dedup_key` e índices únicos (2026-09-26) |
 | NFR-03 | **Resiliência:** mensagens que falham repetidamente vão para uma DLQ após N tentativas | IMPLEMENTADO na infraestrutura (2026-09-26) |
-| NFR-04 | **Observabilidade:** logs estruturados em JSON, nível configurável, sem duplicação | EM ANDAMENTO — logs JSON implementados em `TASK-13`; métricas HTTP/Prometheus seguem em `ISS-14` |
+| NFR-04 | **Observabilidade:** logs estruturados em JSON, nível configurável, sem duplicação, métricas HTTP para Prometheus | IMPLEMENTADO (2026-10-08: `TASK-13` + `ISS-14`) |
 | NFR-05 | **Segurança:** nenhum segredo ou ambiente virtual dentro da imagem; container sem root | IMPLEMENTADO (2026-10-07, `ISS-04`/`TASK-02`) |
 | NFR-06 | **Testabilidade:** `app/core/analysis` com cobertura ≥ 90%; suíte verde no CI | IMPLEMENTADO — cobertura de `app/core/analysis` em 100% na validação de 2026-10-08; CI executa ruff e pytest com cobertura (`ISS-03`, `TASK-05`) |
 | NFR-07 | **Configuração:** toda configuração vem de `Settings` (fonte única) | EM ANDAMENTO (`ISS-10`) |
@@ -331,7 +332,7 @@ Severidade: **Crítico** (perda/corrupção de dados ou segurança), **Alto**, *
 | ISS-05 | Alto | CI publica a imagem (inclusive `latest`) sem rodar testes/lint | `.github/workflows/02-docker-build-push.yml:40,46` | Imagem quebrada em produção | Job `test` (pytest + ruff) como pré-requisito; `latest` só a partir de `main`/tag | RESOLVIDO 2026-10-07 (job test antes do build; latest so da main) |
 | ISS-06 | Alto | Erros não-de-dados poderiam causar retry infinito sem DLQ | `app/core/core_processor.py:103`; infra `TASK-12` | Mensagem venenosa consumiria recursos para sempre e poluiria logs | Redrive policy com DLQ (`maxReceiveCount`) configurada na infraestrutura; worker mantém erro para SQS redirigir após tentativas | IMPLEMENTADO pela infra (2026-09-26; reconciliado em 2026-10-08) |
 | ISS-07 | Alto | Worker não cria nem migra o schema | não há `create_all`/Alembic no projeto por decisão explícita: o schema é propriedade exclusiva da infraestrutura/Flyway (`DEC-01`, `TASK-15`) | Evita donos concorrentes de DDL entre worker, gestor e infra | Worker valida/usa tabelas existentes; migrations seguem em `infra-b3-ecossytem` | IMPLEMENTADO POR DECISÃO (2026-10-08: reconciliado com `DEC-01`/`TASK-15`) |
-| ISS-14 | Médio | Sem endpoint de métricas/saúde, embora o compose exponha a porta 8080 e o Prometheus faça scrape nela; logs só em stdout (fora do ELK) | `infra-b3-ecossytem/docker-compose.yml`, `prometheus.yml` | Worker invisível na observabilidade | `prometheus_client` em :8080 (mensagens processadas/descartadas, latência, recomendações por tipo) + logs JSON (ver `infra#INT-06`) | PLANEJADO |
+| ISS-14 | Médio | Sem endpoint de métricas/saúde, embora o compose exponha a porta 8080 e o Prometheus faça scrape nela | `app/config/observability.py`, `main.py`, `app/core/core_processor.py` | Worker invisível na observabilidade | `/health` e `/metrics` em `METRICS_PORT` (padrão 8080); métricas de mensagens por fila/resultado, latência de processamento e recomendações por tipo; logs JSON já cobertos por `TASK-13` | IMPLEMENTADO (2026-10-08) |
 | ISS-08 | Médio | Logger duplicava handlers, ignorava `LOG_LEVEL` e não emitia JSON | `app/config/config_logger.py` | Linhas de log duplicadas; sem controle de nível | Configuração única e idempotente, `python-json-logger`, nível vindo de `Settings` | IMPLEMENTADO (2026-10-08: JSON + LOG_LEVEL + handler único) |
 | ISS-09 | Médio | Novo cliente boto3 criado a cada chamada SQS | `app/config/aws_config.py:17` | Overhead de CPU/conexões | Criar o cliente uma vez e reutilizá-lo | RESOLVIDO 2026-10-07 (um cliente SQS por processo) |
 | ISS-10 | Médio | Retry do banco lia o env direto, duplicando `Settings` | `app/config/database_config.py` | Duas fontes de verdade | Usar `Settings().retry_attempts/retry_delay` | IMPLEMENTADO (2026-10-08) |

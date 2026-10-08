@@ -43,7 +43,8 @@ As variáveis principais são:
   `AWS_SECRET_ACCESS_KEY`;
 - `QUEUE_NAME` e `HISTORICAL_SERIES_QUEUE_NAME`;
 - `DB_DRIVER`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS` e `DB_NAME`;
-- `RETRY_ATTEMPTS`, `RETRY_DELAY` e `LOG_LEVEL`.
+- `RETRY_ATTEMPTS`, `RETRY_DELAY` e `LOG_LEVEL`;
+- `METRICS_ENABLED` e `METRICS_PORT` para `/health` e `/metrics`.
 
 Em execução local, `DB_HOST` e `LOCALSTACK_ENDPOINT` normalmente apontam para
 `localhost`. Dentro da rede Docker do ecossistema, use os nomes dos serviços.
@@ -119,5 +120,7 @@ SPEC.md                 requisitos, decisões e plano de evolução
 ## Observabilidade e segurança
 
 Os logs estruturados são enviados para `stdout`; ajuste `LOG_LEVEL` para mudar
-o nível de detalhe. Não versione arquivos `.env`, senhas ou tokens. Em produção,
-injete credenciais por um mecanismo de secrets apropriado ao ambiente.
+o nível de detalhe. O worker também expõe `/health` e `/metrics` na porta
+`METRICS_PORT` (padrão `8080`) quando `METRICS_ENABLED` está habilitado. Não
+versione arquivos `.env`, senhas ou tokens. Em produção, injete credenciais por
+um mecanismo de secrets apropriado ao ambiente.
