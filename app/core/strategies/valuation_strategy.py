@@ -1,24 +1,20 @@
-# valuation_strategy.py
 class ValuationStrategy:
-    """
-    Estratégia de Valuation baseada em múltiplos.
+    """Estratégia setorial desativada por ausência de fonte confiável.
 
-    Compra empresas baratas comparadas ao setor:
-    priceEarnings < media_setorial * 0.80
-
-    É um dos métodos mais usados por analistas fundamentalistas e value investors.
+    A regra antiga comparava P/L do ativo com um P/L setorial recebido de fora
+    (`priceEarnings < media_setorial * 0.80`). O ecossistema ainda nao tem uma
+    fonte point-in-time validada para P/L setorial, entao a estrategia fica
+    neutra ate que uma nova tarefa implemente a fonte ou substitua a regra por
+    fatores setoriais medidos no backtest.
     """
+
+    ativa = False
+    motivo_inativa = "sem fonte point-in-time validada para P/L setorial"
 
     def should_buy(self, price_earnings: float, sector_pe: float) -> bool:
-        """
-        Compra quando:
-        - O P/L é pelo menos 20% menor que o P/L médio do setor
-        """
-        return price_earnings < sector_pe * 0.80
+        """Sem fonte setorial confiável, a regra nunca gera compra."""
+        return False
 
     def should_sell(self, price_earnings: float, sector_pe: float) -> bool:
-        """
-        Vende quando:
-        - A ação deixou de estar barata e voltou ao valor justo
-        """
-        return price_earnings > sector_pe * 1.1
+        """Sem fonte setorial confiável, a regra nunca gera venda."""
+        return False

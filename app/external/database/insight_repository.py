@@ -1,10 +1,8 @@
-from dataclasses import dataclass
 from logging import Logger
 from sqlalchemy.orm import Session
 from app.external.database.entity.insight_entity import InsightEntity
 
 
-@dataclass
 class InsightRepository:
 
     def __init__(self, logger: Logger):

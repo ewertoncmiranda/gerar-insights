@@ -1,166 +1,126 @@
-# Gerar Insights - Motor Financeiro
+# Gerar Insights
 
-Aplicacao Python responsavel por ser o cerebro analitico do ecossistema. Operando como um worker assincrono em loop infinito, consome snapshots de ativos brutos de uma fila SQS, aplica matematica financeira e grava historicos e insights em MySQL.
+Worker Python do ecossistema B3 responsável por transformar cotações e séries
+históricas em dados analíticos persistidos no MySQL. O serviço não expõe API
+HTTP: ele consome mensagens do SQS, executa cálculos financeiros e grava os
+resultados para consulta pelos demais componentes.
 
-## Proposta de valor tecnico
---------------------
-- Complementa o ecossistema com processamento em Python (flexibilidade para algoritmos de análise).
-- Demonstra integração inter-linguagem (Java ↔ SQS ↔ Python).
-- Mostra práticas: containerização, configuração por env, retries, logging e testes.
+> A especificação funcional, as decisões técnicas e o andamento das tarefas
+> ficam em [`SPEC.md`](SPEC.md), que é a fonte de verdade do projeto.
 
-## RESPONSABILIDADES PRINCIPAIS
+## Fluxo principal
 
-1. Consumo Robusto (SQS) - Le mensagens de duas filas (cotacoes e series historicas) sem gargalos, processa e apaga de forma eficiente.
-2. Historico Bruto - Armazena snapshots de mercado diarios dos ativos na tabela historico_acoes e os candles OHLCV na tabela serie_historica.
-3. Calculo de Insights - Aplica calculos financeiros (Preco Justo Benjamin Graham, Margem de Seguranca) e sinal tecnico (media movel, z-score, score de volume via Momentum/Mean Reversion) e emite sinais quantitativos para estudo, sempre com aviso legal; nao emite recomendacao de investimento.
+O processo iniciado por `main.py` consome duas filas:
 
-## TECNOLOGIAS E LIBS
+- `tratar-ativos`: recebe snapshots de ativos, grava `historico_acoes` e produz
+  o insight fundamentalista;
+- `sqs-registrar-series-historicas`: recebe candles OHLCV e alimenta
+  `serie_historica`.
 
-- boto3: SDK AWS para acesso a SQS
-- SQLAlchemy + PyMySQL: Gerenciamento de conexoes e persistencia em MySQL
-- python-dotenv: Carregamento de variaveis de ambiente via arquivo .env
-- python-json-logger: Logs estruturados
+O sinal principal usa valuation de Graham e margem de segurança. Quando há
+histórico suficiente, o payload também inclui um contexto técnico separado,
+com média móvel, z-score e volume relativo. Esse contexto não altera o sinal
+fundamentalista principal. O contrato público usa rótulos neutros e inclui
+aviso de que o conteúdo não constitui recomendação de investimento.
 
-## CONFIGURACAO CENTRALIZADA
+O schema do banco e as filas são provisionados pelo repositório de
+infraestrutura. Este worker não executa migrações ao iniciar.
 
-### Todas as configuracoes estao centralizadas em app/config/settings.py seguindo principios SOLID e clean code:
-- Leitura de variaveis de ambiente com defaults seguros
-- Validacao de variaveis obrigatorias
-- Logging de configuracao na inicializacao
+## Requisitos
 
-### Observabilidade e logs
-- O worker faz logs em stdout; quando containerizado, utilize docker logs gerar-insights.
-- Configurar LOG_LEVEL=DEBUG para debug mais detalhado.
-### Fluxo entre gestor-ativos-brutos e gerar-insights
-- `gestor-ativos-brutos` coloca cotações na fila SQS `tratar-ativos` e, quando chamado via `/ativos/robusto/{ativo}`, também publica a série histórica OHLCV na fila `sqs-registrar-series-historicas`.
-- `gerar-insights` consome as duas filas: cotações alimentam o insight fundamentalista (Graham) e o sinal técnico (lido de `serie_historica`); a série histórica alimenta a tabela `serie_historica` usada por esse sinal técnico.
-- O resultado combinado (fundamentos + sinal técnico) é gravado numa única linha de `insight_acao`, que o `gestor-ativos-brutos` consolida em `GET /analises/{simbolo}/analise`.
-- O Java app expõe métricas/health; se necessário, gerar-insights pode consultar o endpoint do Java para sincronização/health.
+- Python 3.11;
+- MySQL acessível com o schema do ecossistema aplicado;
+- AWS SQS ou LocalStack com as duas filas criadas.
 
-## Sinal técnico sobre séries históricas
+## Configuração
 
-Além do insight fundamentalista (Graham), cada cotação processada também calcula um sinal técnico a partir dos candles já persistidos em `serie_historica`:
+Copie `.env.example` para um arquivo local não versionado e ajuste-o ao seu
+ambiente. As configurações são centralizadas em `app/config/settings.py`.
+As variáveis principais são:
 
-- **Média móvel (20 candles)**, **z-score do último fechamento** e **score de volume** (`volume atual / média do volume na janela`), calculados em `TechnicalSeriesAnalyzer` (`app/core/analysis/technical_series.py`).
-- Esses números alimentam `MomentumStrategy` e `MeanReversionStrategy` (`app/core/strategies/`), que já existiam no projeto mas nunca eram chamadas — `SerieTecnicaService` (`app/core/service/serie_tecnica_service.py`) é quem orquestra tudo isso.
-- Quando o símbolo ainda não tem 20 candles em `serie_historica`, o sinal é omitido (não é erro) — o insight fundamentalista continua sendo gerado normalmente.
-- O resultado é anexado ao `detalhes_json` do insight (bloco `contexto_tecnico_serie`, mais os campos `media_movel`, `z_score_fechamento` e `score_volume` no nível de topo, para que o lado Java consolide automaticamente sem nenhuma mudança de código).
+- `ENVIRONMENT` e `ENV_FILE`;
+- `LOCALSTACK_ENDPOINT`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` e
+  `AWS_SECRET_ACCESS_KEY`;
+- `QUEUE_NAME` e `HISTORICAL_SERIES_QUEUE_NAME`;
+- `DB_DRIVER`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS` e `DB_NAME`;
+- `RETRY_ATTEMPTS`, `RETRY_DELAY` e `LOG_LEVEL`;
+- `METRICS_ENABLED` e `METRICS_PORT` para `/health` e `/metrics`.
 
-## Dependência de infraestrutura (`infra-b3-ecossystem`)
+Em execução local, `DB_HOST` e `LOCALSTACK_ENDPOINT` normalmente apontam para
+`localhost`. Dentro da rede Docker do ecossistema, use os nomes dos serviços.
 
-O sinal técnico depende de dois recursos que **não são provisionados por este repositório**, e sim pelo repositório `infra-b3-ecossystem` anexado ao ecossistema:
+## Execução local
 
-- **Fila SQS `sqs-registrar-series-historicas`**, definida via Terraform em `infra/main.tf` (módulo `sqs`, entrada `registrar_series_historicas`).
-- **Tabela MySQL `serie_historica`**, criada em `mysql-init/1 - schema.sql`.
+```bash
+python -m venv .venv
+python -m pip install -r requirements.txt
+python main.py
+```
 
-Sem aplicar esse Terraform (`terraform apply` no diretório `infra/`) e sem rodar esse script de inicialização do MySQL, o segundo consumidor de fila registrado em `main.py` não tem fila para ler nem tabela para gravar — o worker sobe normalmente, mas o sinal técnico nunca é calculado (fica sempre ausente, como se não houvesse candles).
+Ative o ambiente virtual conforme o seu sistema operacional antes de instalar
+as dependências. O worker permanece em execução enquanto consome as filas.
 
-### Problemas comuns e solução
-#### Worker não consome mensagens:
-- Verifique LOCALSTACK_ENDPOINT e QUEUE_NAME.
-- Confirme que a fila existe no LocalStack: awslocal sqs list-queues.
-#### Erros de persistência:
-- Verifique DB_USER/DB_PASS e se o banco está acessível.
-- Ao rodar dentro do Compose, use host mysql:3306; se rodar localmente e MySQL for container com mapeamento 3305, ajuste o host/porta na string de conexão no código.
-Observações finais
-- Estes README seguem o estilo prático/operacional esperado por imagens no Docker Hub: descrição curta, variáveis de ambiente destacadas, instruções de execução e interoperabilidade entre componentes.
-- Se desejar, adapto cada README para incluir badges (build/test) e instruções adicionais de CI/CD, ou gero os arquivos fisicamente no repositório (no momento sou somente leitura: colar o conteúdo acima em cada `README.md` fará o trabalho).
+## Docker
 
-Quer que eu:
-- Gere um `.env` alternativo pronto para rodar via Docker Compose com variáveis já ajustadas para container-network (DB_URL com `mysql:3306` e `SERVER_PORT=8091`)?
-- Adicione exemplos de comandos `awslocal`/`aws` para criar/verificar fila?
+```bash
+docker build -t gerar-insights .
+docker run --rm --env-file .env.local gerar-insights
+```
 
-## VARIAVEIS DE AMBIENTE
+O container ainda precisa alcançar o MySQL e o SQS/LocalStack configurados no
+arquivo de ambiente. No ecossistema completo, a rede e esses serviços são
+orquestrados pelo repositório de infraestrutura.
 
-### Defaults para docker: localstack:4566, mysql:3306
-#### Para execucao local: defina variaveis apontando para localhost
+## Comandos auxiliares
 
-AWS/LocalStack:
-- LOCALSTACK_ENDPOINT (default: http://localstack:4566)
-  Local: http://localhost:4566
-- QUEUE_NAME (default: tratar-ativos)
-- AWS_REGION (default: sa-east-1)
-- AWS_ACCESS_KEY_ID (default: test)
-- AWS_SECRET_ACCESS_KEY (default: test)
+Além do worker principal, o projeto contém rotinas executáveis como módulos:
 
-##### Banco de Dados:
-- DB_DRIVER (default: mysql+pymysql)
-- DB_HOST (default: mysql)
-  Local: localhost
-- DB_PORT (default: 3306)
-  Local: 3305
-- DB_USER (default: spring)
-- DB_PASS (default: spring123)
-- DB_NAME (default: minha_base)
+```bash
+python -m app.insights_diarios
+python -m app.insights_diarios --recuperar
+python -m app.validacao.diario registrar
+python -m app.validacao.diario avaliar
+python -m app.validacao.backtest
+python -m app.fatores calcular --desde AAAA-MM
+```
 
-#### Retry/Timeout:
-- RETRY_ATTEMPTS (default: 3)
-- RETRY_DELAY (default: 10 segundos)
+Consulte `--help` quando disponível e a seção correspondente de `SPEC.md`
+antes de executar rotinas que persistem dados.
 
-##### QUICK START - EXECUCAO LOCAL
+## Testes e qualidade
 
-## Prerequisitos: LocalStack e MySQL rodando em localhost
+Instale também as dependências de desenvolvimento:
 
-1. Criar ambiente virtual:     
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -r gerar-insights/requirements.txt
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest tests -q
+python -m pytest tests -q --cov=app/core/analysis --cov-report=term-missing --cov-fail-under=90
+python -m ruff check app tests
+```
 
-2. Instalar dependencias:
-   pip install -r requirements.txt
+Os testes de domínio ficam principalmente em `tests/analysis`, complementados
+pelos testes de integração e regressão em `tests/`.
 
-3. Criar arquivo .env.local com configuracoes para localhost:
-   DB_HOST=localhost
-   DB_PORT=3305
-   LOCALSTACK_ENDPOINT=http://localhost:4566
+## Estrutura
 
-4. Executar:
-   python main.py
+```text
+app/
+  config/              configuração, banco, AWS e logging
+  core/
+    analysis/          regras e cálculos puros do domínio
+    mapper/            conversão dos payloads de entrada
+    service/           orquestração dos casos de uso
+    strategies/        estratégias técnicas auxiliares
+  external/database/   entidades e repositórios SQLAlchemy
+main.py                 ponto de entrada do worker
+tests/                  suíte automatizada
+SPEC.md                 requisitos, decisões e plano de evolução
+```
 
-#### EXECUCAO VIA DOCKER
+## Observabilidade e segurança
 
-### Na raiz do projeto:
-   docker-compose up --build -d gerar-insights
-
-O container automaticamente usa rede interna docker (localstack:4566, mysql:3306).
-
-#### ESTRUTURA DO PROJETO
-
-gerar-insights/
-  app/
-    config/
-      settings.py              Configuracoes centralizadas (SOLID)
-      aws_config.py            Clientes boto3 (SQS)
-      database_config.py       SqlAlchemy engine
-      config_logger.py         Setup de logs
-    core/
-      core_processor.py        Consumo das filas SQS (ativos + series historicas) e orquestracao
-      analysis/                Calculos puros: valuation Graham, contexto tecnico, sinal tecnico de serie
-      strategies/               Momentum e Mean Reversion (usadas pelo sinal tecnico de serie)
-      service/                  Servicos de aplicacao (FinancialAnalyzerService, SerieHistoricaService, SerieTecnicaService, PersistenciaHistoricoService)
-      mapper/                   Conversao de payload bruto para objetos de dominio
-    external/
-      database/                 Entidades e repositorios SQLAlchemy
-  main.py                       Ponto de entrada
-  requirements.txt              Dependencias
-  Dockerfile                    Imagem Docker
-
-#### TESTES
-
-Execute testes automatizados:
-   pytest tests/ -v
-
-### NOTAS IMPORTANTES
-
-- Arquivo .env.local nao deve ser commitado (.gitignore ja ignora)
-- Senhas/tokens nao devem ser hard-coded em producao
-- Use secrets manager (AWS Secrets Manager, Vault) em producao
-- Verifique logs iniciais para confirmar que configuracao foi carregada
-
-Observações finais
-- Estes README seguem o estilo prático/operacional esperado por imagens no Docker Hub: descrição curta, variáveis de ambiente destacadas, instruções de execução e interoperabilidade entre componentes.
-- Se desejar, adapto cada README para incluir badges (build/test) e instruções adicionais de CI/CD, ou gero os arquivos fisicamente no repositório (no momento sou somente leitura: colar o conteúdo acima em cada `README.md` fará o trabalho).
-
-Quer que eu:
-- Gere um `.env` alternativo pronto para rodar via Docker Compose com variáveis já ajustadas para container-network (DB_URL com `mysql:3306` e `SERVER_PORT=8091`)?
-- Adicione exemplos de comandos `awslocal`/`aws` para criar/verificar fila?# gerar-insights
+Os logs estruturados são enviados para `stdout`; ajuste `LOG_LEVEL` para mudar
+o nível de detalhe. O worker também expõe `/health` e `/metrics` na porta
+`METRICS_PORT` (padrão `8080`) quando `METRICS_ENABLED` está habilitado. Não
+versione arquivos `.env`, senhas ou tokens. Em produção, injete credenciais por
+um mecanismo de secrets apropriado ao ambiente.

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 
 class RepositorioOpiniao:
@@ -112,3 +112,108 @@ class RepositorioOpiniao:
             registro,
         )
         return bool(resultado.rowcount)
+
+    # --- Plano GEM ---------------------------------------------------------
+
+    def favoritos_para_gemini(self, db) -> list[str]:
+        try:
+            linhas = db.execute(text(
+                "SELECT simbolo FROM ativo_monitorado "
+                "WHERE ativo = TRUE AND tipo_coleta = 'COTACAO_E_HISTORICO' ORDER BY simbolo"
+            ))
+            return [r[0] for r in linhas]
+        except Exception:  # noqa: BLE001 - bases antigas seguem sem prioridade de favorito
+            db.rollback()
+            return []
+
+    def monitorados_ativos(self, db) -> list[str]:
+        try:
+            linhas = db.execute(text("SELECT simbolo FROM ativo_monitorado WHERE ativo = TRUE ORDER BY simbolo"))
+            return [r[0] for r in linhas]
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            return []
+
+    def com_mudanca_de_opiniao(self, db, data_pregao: date, simbolos: list[str]) -> list[str]:
+        """Comparação leve: conjunto opinião/risco de hoje contra pregão anterior em opiniao_ia."""
+        if not simbolos:
+            return []
+        try:
+            anterior = db.execute(
+                text("SELECT MAX(data_pregao) FROM opiniao_ia WHERE data_pregao < :d"), {"d": data_pregao}
+            ).scalar()
+            if anterior is None:
+                return []
+            linhas = db.execute(text(
+                "SELECT h.simbolo FROM opiniao_ia h LEFT JOIN opiniao_ia a "
+                "ON a.simbolo = h.simbolo AND a.horizonte_pregoes = h.horizonte_pregoes "
+                "AND a.data_pregao = :a AND a.origem = h.origem "
+                "WHERE h.data_pregao = :d AND h.simbolo IN :s "
+                "AND (a.id IS NULL OR a.opiniao <> h.opiniao OR a.risco <> h.risco) "
+                "GROUP BY h.simbolo ORDER BY h.simbolo"
+            ).bindparams(bindparam("s", expanding=True)),
+                {"d": data_pregao, "a": anterior, "s": simbolos})
+            return [r[0] for r in linhas]
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            return []
+
+    def com_variacao_incomum(self, db, data_pregao: date, simbolos: list[str]) -> list[str]:
+        if not simbolos:
+            return []
+        try:
+            linhas = db.execute(text(
+                "WITH ret AS ("
+                " SELECT simbolo, data_pregao, fechamento / LAG(fechamento) OVER "
+                " (PARTITION BY simbolo ORDER BY data_pregao) - 1 AS r "
+                " FROM cotacao_b3_diaria WHERE simbolo IN :s AND data_pregao <= :d"
+                "), hist AS ("
+                " SELECT simbolo, STDDEV_SAMP(r) AS dp FROM ("
+                "  SELECT simbolo, r, ROW_NUMBER() OVER (PARTITION BY simbolo ORDER BY data_pregao DESC) rn "
+                "  FROM ret WHERE data_pregao < :d AND r IS NOT NULL"
+                " ) x WHERE rn <= 63 GROUP BY simbolo"
+                ") SELECT r.simbolo FROM ret r JOIN hist h ON h.simbolo = r.simbolo "
+                "WHERE r.data_pregao = :d AND h.dp IS NOT NULL AND ABS(r.r) > 2 * h.dp ORDER BY r.simbolo"
+            ).bindparams(bindparam("s", expanding=True)),
+                {"d": data_pregao, "s": simbolos})
+            return [r[0] for r in linhas]
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            return []
+
+    def por_liquidez(self, db, simbolos: list[str]) -> list[str]:
+        if not simbolos:
+            return []
+        try:
+            linhas = db.execute(text(
+                "SELECT simbolo FROM fator_valor WHERE fator_codigo = 'LIQUIDEZ_63D' AND simbolo IN :s "
+                "AND data_referencia = (SELECT MAX(data_referencia) FROM fator_valor WHERE fator_codigo = 'LIQUIDEZ_63D') "
+                "ORDER BY valor DESC"
+            ).bindparams(bindparam("s", expanding=True)), {"s": simbolos})
+            return [r[0] for r in linhas]
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            return []
+
+    def opinioes_modelo_por_hash(self, db, simbolo: str, data_pregao: date, dossie_hash: str) -> list[dict]:
+        linhas = db.execute(text(
+            "SELECT horizonte_pregoes, opiniao, risco, justificativa_json, invalida_json, dados_ausentes_json, "
+            "evidencias_json, modelo, versao_prompt, versao_regra, dossie_hash, insight_id "
+            "FROM opiniao_ia WHERE simbolo = :s AND data_pregao < :d AND dossie_hash = :hash "
+            "AND origem = 'MODELO' ORDER BY data_pregao DESC"
+        ), {"s": simbolo, "d": data_pregao, "hash": dossie_hash})
+        vistos: set[int] = set()
+        saida = []
+        for r in linhas:
+            h = int(r[0])
+            if h in vistos:
+                continue
+            vistos.add(h)
+            saida.append({
+                "simbolo": simbolo, "data_pregao": data_pregao, "horizonte_pregoes": h,
+                "opiniao": r[1], "risco": r[2], "justificativa_json": r[3], "invalida_json": r[4],
+                "dados_ausentes_json": r[5], "evidencias_json": r[6], "modelo": r[7],
+                "versao_prompt": r[8], "versao_regra": r[9], "origem": "MODELO", "tentativas": 0,
+                "dossie_hash": r[10], "insight_id": r[11],
+            })
+        return saida

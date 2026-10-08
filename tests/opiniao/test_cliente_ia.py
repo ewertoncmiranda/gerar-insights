@@ -15,7 +15,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from app.opiniao import gerar
-from app.opiniao.cliente_ia import ErroDoServicoIA, Identidade, ServicoIA, pedido_do_dossie
+from app.opiniao.cliente_ia import (
+    ErroDoServicoIA,
+    Identidade,
+    RotaNaoEncontrada,
+    ServicoIA,
+    pedido_do_ativo,
+    pedido_do_dossie,
+)
 from app.opiniao.regras import CURTO, MEDIO, NEGATIVO, montar_dossie
 from app.opiniao.reserva import resposta_de_regra
 
@@ -44,7 +51,9 @@ class _Estado:
     def __init__(self):
         self.recebidos: list[dict] = []
         self.status_opiniao = 200
+        self.status_ativo = 200
         self.resposta: dict | None = None
+        self.resposta_ativo: dict | None = None
 
 
 def _servidor(estado: _Estado):
@@ -69,6 +78,12 @@ def _servidor(estado: _Estado):
         def do_POST(self):
             corpo = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             estado.recebidos.append(corpo)
+            if self.path == "/opiniao/ativo":
+                if estado.status_ativo != 200:
+                    self._json(estado.status_ativo, {"detail": "erro de teste"})
+                    return
+                self._json(200, estado.resposta_ativo)
+                return
             if estado.status_opiniao != 200:
                 self._json(estado.status_opiniao, {"detail": "erro de teste"})
                 return
@@ -112,6 +127,29 @@ class TestCliente:
         resposta = cliente.opinar(pedido_do_dossie("PETR4", HOJE, dossie[MEDIO], ausentes, "v"))
         assert resposta["origem"] == "MODELO"
         assert estado.recebidos[0]["simbolo"] == "PETR4"
+
+    def test_opinar_ativo_envia_tres_horizontes_em_uma_requisicao(self, servico):
+        cliente, estado = servico
+        dossie, ausentes = _dossie()
+        estado.resposta_ativo = {
+            "skills_versao": "skills@abc",
+            "cota": {"gemini_disponivel": True},
+            "itens": [
+                {**resposta_de_regra(d), "horizonte_pregoes": h, "modelo": "gemini", "origem": "MODELO"}
+                for h, d in dossie.items()
+            ],
+        }
+        resposta = cliente.opinar_ativo(pedido_do_ativo("PETR4", HOJE, dossie, ausentes, "v"))
+        assert len(estado.recebidos) == 1
+        assert [h["horizonte_pregoes"] for h in estado.recebidos[0]["horizontes"]] == [21, 63, 126]
+        assert len(resposta["itens"]) == 3 and resposta["cota"]["gemini_disponivel"] is True
+
+    def test_opinar_ativo_404_sinaliza_fallback_v1(self, servico):
+        cliente, estado = servico
+        estado.status_ativo = 404
+        dossie, ausentes = _dossie()
+        with pytest.raises(RotaNaoEncontrada):
+            cliente.opinar_ativo(pedido_do_ativo("PETR4", HOJE, dossie, ausentes, "v"))
 
     def test_erro_http_vira_erro_do_servico(self, servico):
         cliente, estado = servico

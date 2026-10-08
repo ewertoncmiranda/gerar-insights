@@ -1,11 +1,12 @@
 import json
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from logging import Logger
 
 from app.config.aws_config import AwsConfig
 from app.config.database_config import ConfigDatabase
+from app.config.observability import ObservabilityMetrics
 from app.core.mapper.equity_snapshot import SnapshotAcao
 from app.core.service.financial_analyzer_service import FinancialAnalyzerService
 from app.core.service.persistencia_service import PersistenciaHistoricoService
@@ -25,9 +26,10 @@ class CoreProcessor:
     insight_repository: InsightRepository
     aws: AwsConfig
     session_factory: object
+    metricas: ObservabilityMetrics = field(default_factory=ObservabilityMetrics)
 
     @staticmethod
-    def instanciar(logger: Logger):
+    def instanciar(logger: Logger, metricas: ObservabilityMetrics | None = None):
         persistence = PersistenciaHistoricoService()
         serie_historica_service = SerieHistoricaService()
         financial_analyzer = FinancialAnalyzerService(logger=logger)
@@ -42,6 +44,7 @@ class CoreProcessor:
             insight_repository=insight_repository,
             aws=aws,
             session_factory=session_factory,
+            metricas=metricas or ObservabilityMetrics(),
         )
 
     def ensure_queue(self, queue_name: str) -> str:
@@ -83,6 +86,7 @@ class CoreProcessor:
 
             for message in messages:
                 receipt_handle = message["ReceiptHandle"]
+                concluir_latencia = self.metricas.observar_latencia(nome_fila)
                 try:
                     payload = preparar_evento(nome_fila, json.loads(message["Body"]))
 
@@ -96,16 +100,21 @@ class CoreProcessor:
                             raise error
 
                     self.aws.get_sqs_client().delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+                    self.metricas.registrar_mensagem(nome_fila, "processada")
                     self.logger.info(f"Mensagem da fila {nome_fila} processada e deletada com sucesso")
 
                 except (json.JSONDecodeError, ValueError, TypeError) as bad_data_err:
+                    self.metricas.registrar_mensagem(nome_fila, "invalida")
                     self.logger.error(f"Payload invalido na fila {nome_fila}. Mantendo para DLQ: {bad_data_err}")
 
                 except Exception as process_err:
+                    self.metricas.registrar_mensagem(nome_fila, "erro")
                     self.logger.error(
                         f"Erro ao processar mensagem da fila {nome_fila}. Mantendo na fila para retry: {process_err}",
                         exc_info=True,
                     )
+                finally:
+                    concluir_latencia()
 
             return bool(messages)
         except Exception as loop_err:
@@ -138,6 +147,7 @@ class CoreProcessor:
             detalhes_json=insight_dict["detalhes_json"],
         )
         self.insight_repository.salvar(session, entidade)
+        self.metricas.registrar_recomendacao(insight_dict["recomendacao"])
 
     @staticmethod
     def _chave_legada(payload: dict) -> str:

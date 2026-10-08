@@ -68,7 +68,14 @@ class Settings:
         # modelo e prompt sao configuracao do servico, nao daqui.
         default_ia_url = 'http://ia-opiniao:8000' if self.is_docker else 'http://localhost:8000'
         self.ia_url = os.getenv('IA_URL', default_ia_url)
-        self.ia_timeout_s = _get_int('IA_TIMEOUT_S', 300)
+        self.ia_timeout_s = _get_int('IA_TIMEOUT_S', 200)
+        self.lote_max_gemini = _get_int('LOTE_MAX_GEMINI', 25)
+        self.metrics_port = _get_int('METRICS_PORT', 8080)
+        self.metrics_enabled = os.getenv('METRICS_ENABLED', 'true').lower() not in {
+            '0',
+            'false',
+            'no',
+        }
 
     def _normalize_local_database_host(self):
         if self.is_docker:
