@@ -18,7 +18,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from app.opiniao.modelo_llm import resposta_de_regra
+from app.opiniao.reserva import resposta_de_regra
 from app.opiniao.regras import HORIZONTES, montar_dossie
 from app.opiniao.repositorio import RepositorioOpiniao
 

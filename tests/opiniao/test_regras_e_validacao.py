@@ -1,13 +1,14 @@
-"""Opiniao por horizonte: regras puras, validacao da resposta do modelo e orquestracao (sem rede)."""
+"""Opiniao por horizonte no worker: regras puras e reserva por regra (sem rede).
+
+Validacao da resposta do modelo e prompt sao do servico de IA (insider-ia-b3-ecossytem, TASK-IA-03),
+testados la em tests/test_validador_e_regras.py.
+"""
 
 from __future__ import annotations
 
-import json
-import logging
 from datetime import date
 
-from app.opiniao import gerar
-from app.opiniao.modelo_llm import ErroDoProvedor, resposta_de_regra, validar
+from app.opiniao.reserva import resposta_de_regra
 from app.opiniao.regras import (
     CURTO,
     LONGO,
@@ -90,100 +91,13 @@ def _dossie_medio():
     return dossie[MEDIO]
 
 
-def _resposta(**extra):
-    base = {"opiniao": NEGATIVO, "risco": RISCO_ALTO,
-            "justificativa": [{"evidencia_id": "regra_v1", "leitura": "O sinal determinístico aponta VENDA_VALUATION."}],
-            "o_que_invalida": ["Revisão forte do lucro projetado."]}
-    base.update(extra)
-    return base
-
-
-class TestValidacao:
-    def test_resposta_correta_passa(self):
-        ok, erros = validar(_resposta(), _dossie_medio())
-        assert erros == [] and ok["opiniao"] == NEGATIVO
-
-    def test_opiniao_fora_das_permitidas_e_rejeitada(self):
-        _, erros = validar(_resposta(opiniao=POSITIVO), _dossie_medio())
-        assert any("fora das permitidas" in e for e in erros)
-
-    def test_risco_diferente_do_calculado_e_rejeitado(self):
-        _, erros = validar(_resposta(risco="RISCO_BAIXO"), _dossie_medio())
-        assert any("difere do calculado" in e for e in erros)
-
-    def test_evidencia_inexistente_e_rejeitada(self):
-        r = _resposta(justificativa=[{"evidencia_id": "inventada", "leitura": "x"}])
-        _, erros = validar(r, _dossie_medio())
-        assert any("inexistente" in e for e in erros)
-
-    def test_numero_que_nao_esta_no_dossie_e_rejeitado(self):
-        r = _resposta(justificativa=[{"evidencia_id": "margem_graham_base",
-                                      "leitura": "A margem é de 73,2% segundo o modelo."}])
-        _, erros = validar(r, _dossie_medio())
-        assert any("número fora do dossiê" in e for e in erros)
-
-    def test_numero_do_dossie_e_aceito(self):
-        r = _resposta(justificativa=[{"evidencia_id": "margem_graham_base",
-                                      "leitura": "A margem de segurança está em -458.0%, bem negativa."}])
-        ok, erros = validar(r, _dossie_medio())
-        assert erros == [] and ok
-
-    def test_vocabulario_proibido_e_rejeitado(self):
-        r = _resposta(o_que_invalida=["Garantido que cai."])
-        _, erros = validar(r, _dossie_medio())
-        assert any("vocabulário" in e for e in erros)
-
-    def test_negativo_exige_citar_evidencia_desfavoravel(self):
-        r = _resposta(justificativa=[{"evidencia_id": "sinal_momentum", "leitura": "Momentum neutro."}])
-        _, erros = validar(r, _dossie_medio())
-        assert any("sem citar evidência desfavorável" in e for e in erros)
-
-    def test_nao_objeto_e_rejeitado(self):
-        assert validar([], _dossie_medio())[0] is None
-
-
-class _Provedor:
-    nome = "modelo-teste"
-
-    def __init__(self, respostas):
-        self._respostas = list(respostas)
-        self.chamadas = 0
-
-    def gerar(self, sistema, usuario, schema):
-        self.chamadas += 1
-        item = self._respostas.pop(0)
-        if isinstance(item, Exception):
-            raise item
-        return item if isinstance(item, str) else json.dumps(item)
-
-
-LOG = logging.getLogger("teste")
-
-
-class TestConsultaAoModelo:
-    def test_segunda_tentativa_corrige_a_primeira(self):
-        provedor = _Provedor([_resposta(opiniao=POSITIVO), _resposta()])
-        resposta, tentativas = gerar.consultar_modelo(provedor, "WEGE3", _dossie_medio(), LOG)
-        assert resposta["opiniao"] == NEGATIVO and tentativas == 2
-
-    def test_duas_rejeicoes_devolvem_none(self):
-        provedor = _Provedor(["isto nao e json", _resposta(opiniao=POSITIVO)])
-        resposta, tentativas = gerar.consultar_modelo(provedor, "WEGE3", _dossie_medio(), LOG)
-        assert resposta is None and tentativas == 2
-
-    def test_provedor_fora_do_ar_nao_derruba(self):
-        provedor = _Provedor([ErroDoProvedor("fora")])
-        resposta, _ = gerar.consultar_modelo(provedor, "WEGE3", _dossie_medio(), LOG)
-        assert resposta is None and provedor.chamadas == 1
-
-
 class TestRespostaDeRegra:
     def test_regra_usa_a_opiniao_mais_forte_permitida_e_valida(self):
         d = _dossie_medio()
         resposta = resposta_de_regra(d)
         assert resposta["opiniao"] == NEGATIVO and resposta["risco"] == d.risco
-        ok, erros = validar(resposta, d)
-        assert erros == [], erros
+        ids = {e.id for e in d.evidencias}
+        assert resposta["justificativa"] and all(j["evidencia_id"] in ids for j in resposta["justificativa"])
 
     def test_sem_base_nao_inventa_direcao(self):
         dossie, _ = montar_dossie(_insight(), [], 0, HOJE)
@@ -204,20 +118,7 @@ class TestPontosApontadosNaRevisao:
         por_id = {e.id: e for e in d.evidencias}
         assert all(por_id[j["evidencia_id"]].direcao > 0 for j in resposta["justificativa"])
         assert any("sentido contrário" in i and "reversão" in i.lower() for i in resposta["o_que_invalida"])
-        # o texto "em sentido contrario" repete a evidencia de proposito: nao passa pelo validador do modelo
-        assert validar({**resposta, "o_que_invalida": []}, d)[1] == []
 
-    def test_justificativa_com_mais_de_cinco_itens_e_rejeitada(self):
+    def test_regra_nunca_passa_de_cinco_justificativas(self):
         d = _dossie_medio()
-        itens = [{"evidencia_id": e.id, "leitura": f"{e.rotulo}."} for e in d.evidencias][:6]
-        assert len(itens) == 6
-        _, erros = validar(_resposta(justificativa=itens), d)
-        assert any("no máximo 5" in e for e in erros)
-
-    def test_o_que_invalida_que_repete_evidencia_e_rejeitado(self):
-        d = _dossie_medio()
-        repetida = f"{d.evidencias[0].rotulo}: {d.evidencias[0].valor}"
-        _, erros = validar(_resposta(o_que_invalida=[repetida]), d)
-        assert any("repete uma evidência" in e for e in erros)
-        _, erros = validar(_resposta(o_que_invalida=["fator_accruals e fator_beta_12m"]), d)
-        assert erros  # ids soltos nao passam (frase curta ou repeticao)
+        assert len(resposta_de_regra(d)["justificativa"]) <= 5
