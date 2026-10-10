@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/sinal-gerado.v1.schema.json",
+  "title": "operacional.sinal-gerado.v1",
+  "description": "Sinal avaliado para um ativo e horizonte no fechamento do pregao, com a elegibilidade operacional. Produtor: gerar-insights (OPR-INS-1/7). Gravado antes em evento_operacional (tipo SINAL_GERADO).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "comum.v1.schema.json#/$defs/envelope"
+    }
+  ],
+  "properties": {
+    "evento": {
+      "const": "operacional.sinal-gerado.v1"
+    },
+    "dados": {
+      "type": "object",
+      "required": [
+        "simbolo",
+        "horizonte_pregoes",
+        "sinal",
+        "elegivel",
+        "faixa_liquidez",
+        "motivos"
+      ],
+      "properties": {
+        "simbolo": {
+          "$ref": "comum.v1.schema.json#/$defs/simbolo"
+        },
+        "horizonte_pregoes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sinal": {
+          "enum": [
+            "SINAL_POSITIVO",
+            "SINAL_NEGATIVO",
+            "SINAL_NEUTRO",
+            "SEM_BASE"
+          ]
+        },
+        "elegivel": {
+          "type": "boolean"
+        },
+        "faixa_liquidez": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/faixaLiquidez"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "motivos": {
+          "$ref": "comum.v1.schema.json#/$defs/motivos"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unevaluatedProperties": false
+}

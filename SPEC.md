@@ -601,3 +601,89 @@ Uma versão de regra só é promovida se, nas janelas de teste:
 | TASK-GEM-L4 | **Configuração e resumo.** `LOTE_MAX_GEMINI` (25) e `IA_TIMEOUT_S` (de 300 para 200) em `Settings`; log final do lote com `priorizados`, `chamadas`, `reaproveitadas`, `sem_cota`, `modelo`, `regra`, `falhas_do_servico`; flag `--sem-limite` para rodar todos (uso manual) | `app/config/settings.py`, `app/opiniao/gerar.py`, `tests/opiniao/test_gerar_lote.py` | L1..L3 | Linha de resumo com todos os campos; `--sem-limite` ignora o corte | IMPLEMENTADO (2026-10-08) |
 
 **Aceite do plano GEM no worker.** Rodando o lote de um pregão com o serviço no ar: no máximo `LOTE_MAX_GEMINI` requisições ao `ia-opiniao`; nenhuma requisição para ativo fora da fila; linhas `REGRA` iguais às de hoje para os demais (mesmo critério de TASK-IA-03); `pytest tests/opiniao -q` verde.
+
+---
+
+## Plano OPR: diário operacional simulado (2026-10-08)
+
+**Status:** PLANEJADO · **Contexto:** `infra-b3-ecossytem/SPEC.md`, Plano OPR. Este worker é o dono das regras operacionais simuladas: elegibilidade, entrada, tamanho de posição, saída, custos e diário. O resultado ainda é paper trading; não autoriza capital real.
+
+**Meta.** Converter sinais e fatores já existentes em operações simuladas auditáveis, com comparação líquida contra CDI. A saída principal é um diário de 3 a 6 meses que diga se o sistema está `NAO_OPERAVEL`, `EM_OBSERVACAO`, `PAPER_TRADING_ELEGIVEL` ou `BLOQUEADO`.
+
+### Tarefas desta aplicação
+
+| ID | Tarefa | Arquivos | Depende | Aceite | Status |
+|---|---|---|---|---|---|
+| OPR-INS-1 | **Elegibilidade operacional.** Criar módulo `app/operacional/elegibilidade.py` lendo liquidez do ETL: volume financeiro 63d, número de negócios 63d, buracos na série, status de ajuste de preço, fundamento point-in-time e eventos bloqueantes | `app/operacional/**`, `tests/operacional/**` | infra#OPR-INFRA-1; etl#OPR-ETL-1..4 | Ativo líquido passa; ativo ilíquido, sem fundamento vigente ou com salto sem evento é bloqueado com motivo estruturado | PLANEJADO |
+| OPR-INS-2 | **Sizing teórico.** Criar `risco.py` com capital teórico configurável, risco máximo por operação, exposição máxima por ativo/setor e redutor por volatilidade/liquidez | `app/operacional/risco.py`, `app/config/settings.py` | OPR-INS-1 | Para capital de R$ 100 mil, a posição nunca excede limites configurados e cai para zero quando elegibilidade falha | PLANEJADO |
+| OPR-INS-3 | **Regra de saída.** Criar `saida.py` com saída por mudança de sinal, stop por volatilidade/drawdown, prazo máximo da tese, perda de liquidez e evento relevante | `app/operacional/saida.py` | OPR-INS-1, OPR-INS-2 | Testes cobrem cada motivo de saída e prioridade quando mais de um motivo ocorre no mesmo pregão | PLANEJADO |
+| OPR-INS-4 | **Diário operacional.** Criar comando `python -m app.operacional.diario registrar|avaliar` para abrir/fechar operações simuladas, aplicar custos, calcular retorno bruto, retorno líquido, CDI, excesso e drawdown | `app/operacional/diario.py`, repositórios novos | infra#OPR-INFRA-1; OPR-INS-1..3 | Rodar duas vezes o mesmo pregão não duplica; operação fechada tem preço, custo, retorno líquido e motivo de saída | PLANEJADO |
+| OPR-INS-5 | **Custos e IR estimado.** Criar `custos.py` com custo fixo, slippage por spread/liquidez e imposto estimado separado do resultado pós-custos | `app/operacional/custos.py` | OPR-INS-4; etl#OPR-ETL-2 | Diário exibe `resultado_bruto`, `resultado_pos_custos` e `resultado_pos_imposto_estimado`; ausência de dado de spread usa fallback conservador | PLANEJADO |
+| OPR-INS-6 | **Trava de operabilidade.** Calcular status do sistema por janela: mínimo 63 pregões, retorno líquido > CDI, drawdown abaixo do limite, zero violação de liquidez e amostra mínima de operações encerradas | `app/operacional/status.py` | OPR-INS-4, OPR-INS-5 | Sistema começa `NAO_OPERAVEL`, vai para `EM_OBSERVACAO` durante coleta e só vira `PAPER_TRADING_ELEGIVEL` cumprindo todos os critérios | PLANEJADO |
+| OPR-INS-7 | **Eventos operacionais.** Publicar eventos `operacional.*.v1` após diário avaliado, posição aberta/fechada e alerta de risco, sem conhecer Telegram ou painel | mensageria existente | infra#OPR-INFRA-2; OPR-INS-4 | Payload passa nos JSON Schemas e contém `schemaVersion`, `eventId`, `correlationId`, `versao_regra` e `dataPregao` | PLANEJADO |
+
+### Configurações previstas
+
+| Setting | Padrão inicial |
+|---|---|
+| `OPERACIONAL_CAPITAL_TEORICO` | `100000` |
+| `OPERACIONAL_RISCO_POR_OPERACAO` | `0.005` |
+| `OPERACIONAL_EXPOSICAO_MAX_ATIVO` | `0.05` |
+| `OPERACIONAL_EXPOSICAO_MAX_SETOR` | `0.20` |
+| `OPERACIONAL_CUSTO_FIXO_BPS` | `10` |
+| `OPERACIONAL_MIN_PREGÕES` | `63` |
+| `OPERACIONAL_STOP_ATR` | `2` (stop inicial = entrada − 2 × ATR14) |
+| `OPERACIONAL_TRAILING_ATR` | `3` (stop móvel, armado após +1 ATR de lucro) |
+| `OPERACIONAL_MAX_PARTICIPACAO_ADTV` | `0.01` (posição ≤ 1% do volume financeiro médio de 21 pregões) |
+| `OPERACIONAL_MAX_POSICOES` | `15` |
+| `OPERACIONAL_POSICAO_MINIMA` | `500` (R$; abaixo disso não abre) |
+| `OPERACIONAL_REDUTOR_LIQUIDEZ_MEDIA` | `0.5` |
+| `OPERACIONAL_REDUTOR_VOL_P80` | `0.75` |
+| `OPERACIONAL_DIAS_ILIQUIDO_SAIDA` | `5` |
+| `OPERACIONAL_REGRAS_IR` | `ir/2026.json` (regras fiscais versionadas por vigência) |
+
+### Parâmetros fixados (DEC-OPR-1, 2026-10-10)
+
+Decisão do usuário: o plano OPR passa a ter valores, não só intenções. Os números abaixo são o ponto de partida do paper trading; mudar qualquer um é nova `versao_regra` em `regra_operacional` (nunca editar a versão em uso). Não é recomendação de investimento.
+
+**Liquidez (OPR-INS-1, sobre `ativo_liquidez_diaria` do ETL, janela de 63 pregões anteriores ao pregão da decisão).**
+
+| Critério | Mínimo para entrar |
+|---|---|
+| Volume financeiro médio (`volume_financeiro_medio_63d`) | R$ 5 milhões/dia |
+| Negócios médios (`negocios_medio_63d`) | 500/dia |
+| Presença (`presenca_63d`) | 95% dos pregões |
+| Spread mediano (`spread_mediano_63d` = (melhor venda − melhor compra) ÷ preço médio) | ≤ 0,5%; ausente ⇒ cai uma faixa e o custo usa a reserva conservadora |
+
+Faixas: `ALTA` (o dobro de cada mínimo), `MEDIA` (passa nos mínimos), `INSUFICIENTE` (bloqueado, motivo estruturado). Posição aberta só sai por liquidez após `OPERACIONAL_DIAS_ILIQUIDO_SAIDA` pregões seguidos em `INSUFICIENTE`.
+
+**Tamanho de posição (OPR-INS-2).**
+1. `quantidade_risco = (capital × OPERACIONAL_RISCO_POR_OPERACAO) ÷ (OPERACIONAL_STOP_ATR × ATR14)`.
+2. Limites (vale o menor): `OPERACIONAL_EXPOSICAO_MAX_ATIVO` × capital; espaço restante em `OPERACIONAL_EXPOSICAO_MAX_SETOR`; `OPERACIONAL_MAX_PARTICIPACAO_ADTV` × volume financeiro médio de 21 pregões; caixa disponível (sem alavancagem); `OPERACIONAL_MAX_POSICOES` abertas.
+3. Redutores multiplicativos: faixa `MEDIA` × `OPERACIONAL_REDUTOR_LIQUIDEZ_MEDIA`; volatilidade acima do percentil 80 do universo × `OPERACIONAL_REDUTOR_VOL_P80`.
+4. Arredonda para baixo: lote de 100; resto no fracionário. Valor final < `OPERACIONAL_POSICAO_MINIMA` ⇒ não abre (motivo `POSICAO_ABAIXO_DO_MINIMO`).
+5. Caixa não alocado rende CDI no diário.
+
+**Saída (OPR-INS-3).** Decisão no fechamento do pregão D, execução simulada na **abertura de D+1** (nunca no fechamento de D: seria olhar o futuro). Mais de um motivo no mesmo pregão: vale o primeiro.
+
+| Prioridade | Motivo | Gatilho |
+|---|---|---|
+| 1 | `EVENTO` | Fato relevante na CVM (IPE, `FATO_RELEVANTE`) ou salto de preço sem evento que o explique (OPR-ETL-3) |
+| 2 | `STOP` | Fechamento < entrada − `OPERACIONAL_STOP_ATR` × ATR14; após +1 ATR de lucro, fechamento < máxima desde a entrada − `OPERACIONAL_TRAILING_ATR` × ATR14 |
+| 3 | `LIQUIDEZ` | `OPERACIONAL_DIAS_ILIQUIDO_SAIDA` pregões seguidos em `INSUFICIENTE` |
+| 4 | `SINAL` | Opinião do horizonte da operação vira `SINAL_NEGATIVO` ou `SEM_BASE` |
+| 5 | `PRAZO` | Fim do horizonte da tese (21, 63 ou 126 pregões) |
+
+**IR estimado (OPR-INS-5).** Regras em `OPERACIONAL_REGRAS_IR` (JSON com `vigente_desde`), nunca fixas no código; nenhuma consulta automática à Receita. Apuração mensal:
+- ações, operação comum: 15% sobre o lucro líquido do mês; **isento se as vendas de ações no mês somarem até R$ 20 mil** (não vale para ETF/FII); prejuízo acumulado compensa lucro futuro da mesma modalidade; IRRF de 0,005% sobre vendas abatido do devido;
+- day trade (20%) não ocorre, porque entrada e saída nunca caem no mesmo pregão; se ocorrer, a regra marca a operação como violação;
+- proventos: dividendos isentos, salvo a retenção sobre dividendos acima de R$ 50 mil/mês da mesma empresa (reforma do IR vigente em 2026) — **conferir a regra vigente antes de ligar**; JCP pelo valor líquido da retenção (conferir alíquota vigente);
+- diário com três linhas: `resultado_bruto`, `resultado_pos_custos`, `resultado_pos_imposto_estimado`.
+
+**Comparação justa com o CDI (OPR-INS-6).** O benchmark é o **CDI líquido de IR** pela tabela regressiva da renda fixa (22,5% até 180 dias, 20% até 360, 17,5% até 720, 15% acima), contado do início da janela. Carteira já tributada contra CDI bruto reprova o sistema injustamente.
+
+### Aceite local
+
+- `pytest tests/operacional -q` cobre elegibilidade, sizing, saída, custos, idempotência e status.
+- Nenhuma regra operacional usa fundamento com `data_entrega` posterior ao pregão.
+- Toda decisão registra motivo legível de negócio e payload estruturado para o painel.

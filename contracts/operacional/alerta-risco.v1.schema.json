@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/alerta-risco.v1.schema.json",
+  "title": "operacional.alerta-risco.v1",
+  "description": "Alerta de saude operacional para o canal de alertas (Telegram so via adapter, OPR-INFRA-4). Produtor: gerar-insights / gestor (OPR-INS-7, OPR-GES-4). Gravado antes em evento_operacional (tipo ALERTA_RISCO).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "comum.v1.schema.json#/$defs/envelope"
+    }
+  ],
+  "properties": {
+    "evento": {
+      "const": "operacional.alerta-risco.v1"
+    },
+    "dados": {
+      "type": "object",
+      "required": [
+        "tipo_alerta",
+        "severidade",
+        "simbolo",
+        "operacao_id",
+        "status_sistema",
+        "mensagem",
+        "valor",
+        "limite"
+      ],
+      "properties": {
+        "tipo_alerta": {
+          "enum": [
+            "DRAWDOWN",
+            "LIQUIDEZ",
+            "DADO_INCOMPLETO",
+            "STATUS_ALTERADO",
+            "EVENTO_CVM"
+          ]
+        },
+        "severidade": {
+          "enum": [
+            "INFO",
+            "ATENCAO",
+            "CRITICO"
+          ]
+        },
+        "simbolo": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/simbolo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operacao_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status_sistema": {
+          "$ref": "comum.v1.schema.json#/$defs/statusSistema"
+        },
+        "mensagem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "valor": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "limite": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unevaluatedProperties": false
+}

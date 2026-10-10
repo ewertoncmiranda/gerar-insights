@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/diario-avaliado.v1.schema.json",
+  "title": "operacional.diario-avaliado.v1",
+  "description": "Fotografia diaria da carteira simulada contra o CDI liquido de IR, com o status do sistema. Produtor: gerar-insights (OPR-INS-4/6/7). Gravado antes em evento_operacional (tipo DIARIO_AVALIADO).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "comum.v1.schema.json#/$defs/envelope"
+    }
+  ],
+  "properties": {
+    "evento": {
+      "const": "operacional.diario-avaliado.v1"
+    },
+    "dados": {
+      "type": "object",
+      "required": [
+        "patrimonio",
+        "caixa",
+        "exposicao",
+        "posicoes_abertas",
+        "operacoes_abertas_dia",
+        "operacoes_fechadas_dia",
+        "retorno_bruto_dia",
+        "retorno_liquido_dia",
+        "retorno_liquido_acumulado",
+        "cdi_acumulado",
+        "cdi_liquido_ir_acumulado",
+        "excesso_sobre_cdi_liquido",
+        "drawdown",
+        "drawdown_maximo",
+        "violacoes_liquidez",
+        "pregoes_avaliados",
+        "status_sistema",
+        "status_anterior",
+        "motivos_status"
+      ],
+      "properties": {
+        "patrimonio": {
+          "$ref": "comum.v1.schema.json#/$defs/reais"
+        },
+        "caixa": {
+          "$ref": "comum.v1.schema.json#/$defs/reais"
+        },
+        "exposicao": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "posicoes_abertas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "operacoes_abertas_dia": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "operacoes_fechadas_dia": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retorno_bruto_dia": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/fracao"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retorno_liquido_dia": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/fracao"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retorno_liquido_acumulado": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/fracao"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cdi_acumulado": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/fracao"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cdi_liquido_ir_acumulado": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/fracao"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "excesso_sobre_cdi_liquido": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/fracao"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "drawdown": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "queda desde o pico, <= 0 (-0.08 = -8%)"
+        },
+        "drawdown_maximo": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "queda desde o pico, <= 0 (-0.08 = -8%)"
+        },
+        "violacoes_liquidez": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pregoes_avaliados": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status_sistema": {
+          "$ref": "comum.v1.schema.json#/$defs/statusSistema"
+        },
+        "status_anterior": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/statusSistema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "motivos_status": {
+          "$ref": "comum.v1.schema.json#/$defs/motivos"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unevaluatedProperties": false
+}
