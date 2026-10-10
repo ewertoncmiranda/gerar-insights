@@ -16,7 +16,7 @@ from app.operacional.elegibilidade import FatosDoAtivo
 
 COLUNAS_LIQUIDEZ = (
     "volume_financeiro_medio_21d", "volume_financeiro_medio_63d", "negocios_medio_63d", "presenca_63d",
-    "spread_mediano_63d", "atr14", "volatilidade_63d", "percentil_volatilidade", "dias_sem_preco_63d",
+    "spread_mediano_63d", "spread_estimado_63d", "atr14", "volatilidade_63d", "percentil_volatilidade", "dias_sem_preco_63d",
     "ajuste_serie",
 )
 

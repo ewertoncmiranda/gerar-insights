@@ -138,8 +138,9 @@ class DiarioOperacional:
             if abertura is None:
                 continue  # ativo nao negociou: sai na primeira abertura disponivel
             bruto_saida = abertura * op["quantidade"]
-            spread = _d((por_simbolo.get(op["simbolo"]).metricas if op["simbolo"] in por_simbolo else {}).get("spread_mediano_63d"))
-            c_saida = custo_por_lado(bruto_saida, spread, parametros)
+            metr = por_simbolo[op["simbolo"]].metricas if op["simbolo"] in por_simbolo else {}
+            spread, estimado = _d(metr.get("spread_mediano_63d")), _d(metr.get("spread_estimado_63d"))
+            c_saida = custo_por_lado(bruto_saida, spread, parametros, estimado)
             caixa += bruto_saida - c_saida
             custos_dia += c_saida
             bruto = (abertura - op["preco_entrada"]) * op["quantidade"]
@@ -164,9 +165,10 @@ class DiarioOperacional:
                     op["status"] = "CANCELADA"
                     resumo.canceladas += 1
                 continue
-            spread = _d((por_simbolo.get(op["simbolo"]).metricas if op["simbolo"] in por_simbolo else {}).get("spread_mediano_63d"))
+            metr = por_simbolo[op["simbolo"]].metricas if op["simbolo"] in por_simbolo else {}
+            spread, estimado = _d(metr.get("spread_mediano_63d")), _d(metr.get("spread_estimado_63d"))
             quantidade = int(op["quantidade"])
-            while quantidade > 0 and abertura * quantidade + custo_por_lado(abertura * quantidade, spread, parametros) > caixa:
+            while quantidade > 0 and abertura * quantidade + custo_por_lado(abertura * quantidade, spread, parametros, estimado) > caixa:
                 quantidade = quantidade - LOTE if quantidade > LOTE else int((caixa / abertura * Decimal("0.99")).to_integral_value(ROUND_FLOOR))
                 if quantidade * abertura < p_sizing.posicao_minima:
                     quantidade = 0
@@ -176,7 +178,7 @@ class DiarioOperacional:
                 resumo.canceladas += 1
                 continue
             valor = abertura * quantidade
-            c_entrada = custo_por_lado(valor, spread, parametros)
+            c_entrada = custo_por_lado(valor, spread, parametros, estimado)
             caixa -= valor + c_entrada
             custos_dia += c_entrada
             stop = saida.stop_inicial(abertura, op["atr_entrada"], p_saida)
