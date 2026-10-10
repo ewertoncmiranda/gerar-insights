@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/posicao-aberta.v1.schema.json",
+  "title": "operacional.posicao-aberta.v1",
+  "description": "Operacao simulada aberta: decisao no fechamento de D, execucao na abertura de D+1. Produtor: gerar-insights (OPR-INS-2/4/7). Gravado antes em evento_operacional (tipo POSICAO_ABERTA).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "comum.v1.schema.json#/$defs/envelope"
+    }
+  ],
+  "properties": {
+    "evento": {
+      "const": "operacional.posicao-aberta.v1"
+    },
+    "dados": {
+      "type": "object",
+      "required": [
+        "operacao_id",
+        "simbolo",
+        "setor_grupo",
+        "horizonte_pregoes",
+        "data_decisao_entrada",
+        "data_entrada",
+        "preco_entrada",
+        "quantidade",
+        "valor_entrada",
+        "atr_entrada",
+        "stop_inicial",
+        "faixa_liquidez_entrada",
+        "custos_entrada",
+        "motivo_entrada"
+      ],
+      "properties": {
+        "operacao_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "simbolo": {
+          "$ref": "comum.v1.schema.json#/$defs/simbolo"
+        },
+        "setor_grupo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "horizonte_pregoes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_decisao_entrada": {
+          "$ref": "comum.v1.schema.json#/$defs/data"
+        },
+        "data_entrada": {
+          "$ref": "comum.v1.schema.json#/$defs/data"
+        },
+        "preco_entrada": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "quantidade": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "valor_entrada": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "atr_entrada": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "stop_inicial": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "faixa_liquidez_entrada": {
+          "$ref": "comum.v1.schema.json#/$defs/faixaLiquidez"
+        },
+        "custos_entrada": {
+          "$ref": "comum.v1.schema.json#/$defs/reais"
+        },
+        "motivo_entrada": {
+          "type": "object",
+          "minProperties": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unevaluatedProperties": false
+}

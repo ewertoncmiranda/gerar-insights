@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/status-sistema.v1.schema.json",
+  "title": "Status do sistema operacional (enum compartilhado)",
+  "description": "Fonte unica do status de operabilidade (OPR-INFRA-2), igual ao CHECK ck_diario_status da V23. PAPER_TRADING_ELEGIVEL = elegivel a paper trading, nunca a capital real.",
+  "enum": [
+    "NAO_OPERAVEL",
+    "EM_OBSERVACAO",
+    "PAPER_TRADING_ELEGIVEL",
+    "BLOQUEADO"
+  ]
+}

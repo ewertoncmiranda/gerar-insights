@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/comum.v1.schema.json",
+  "title": "Definicoes comuns dos eventos operacional.*.v1",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "data": {
+      "type": "string",
+      "format": "date"
+    },
+    "simbolo": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]{4}[0-9]{1,2}F?$"
+    },
+    "versaoRegra": {
+      "type": "string",
+      "pattern": "^OPR-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9]+$"
+    },
+    "reais": {
+      "type": "number",
+      "minimum": 0
+    },
+    "resultado": {
+      "type": "number",
+      "description": "R$, pode ser negativo"
+    },
+    "fracao": {
+      "type": "number",
+      "description": "fracao: 0.0052 = 0,52%"
+    },
+    "faixaLiquidez": {
+      "enum": [
+        "ALTA",
+        "MEDIA",
+        "INSUFICIENTE"
+      ]
+    },
+    "motivoSaida": {
+      "enum": [
+        "EVENTO",
+        "STOP",
+        "LIQUIDEZ",
+        "SINAL",
+        "PRAZO"
+      ]
+    },
+    "statusSistema": {
+      "$ref": "status-sistema.v1.schema.json"
+    },
+    "motivo": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "descricao"
+      ],
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "descricao": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "motivos": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/motivo"
+      }
+    },
+    "envelope": {
+      "description": "Campos de todo evento: identidade, idempotencia e rastreio. `modo` e sempre SIMULADO.",
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "eventId",
+        "correlationId",
+        "evento",
+        "versao_regra",
+        "dataPregao",
+        "emitidoEm",
+        "modo",
+        "aviso",
+        "dados"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "eventId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "correlationId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evento": {
+          "type": "string"
+        },
+        "versao_regra": {
+          "$ref": "#/$defs/versaoRegra"
+        },
+        "dataPregao": {
+          "$ref": "#/$defs/data"
+        },
+        "emitidoEm": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modo": {
+          "const": "SIMULADO"
+        },
+        "aviso": {
+          "type": "string",
+          "minLength": 20
+        },
+        "dados": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

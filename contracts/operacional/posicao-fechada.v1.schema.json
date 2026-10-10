@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/posicao-fechada.v1.schema.json",
+  "title": "operacional.posicao-fechada.v1",
+  "description": "Operacao simulada fechada com um unico motivo (prioridade EVENTO > STOP > LIQUIDEZ > SINAL > PRAZO). Produtor: gerar-insights (OPR-INS-3/4/5/7). Gravado antes em evento_operacional (tipo POSICAO_FECHADA).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "comum.v1.schema.json#/$defs/envelope"
+    }
+  ],
+  "properties": {
+    "evento": {
+      "const": "operacional.posicao-fechada.v1"
+    },
+    "dados": {
+      "type": "object",
+      "required": [
+        "operacao_id",
+        "simbolo",
+        "horizonte_pregoes",
+        "data_entrada",
+        "data_saida",
+        "preco_entrada",
+        "preco_saida",
+        "quantidade",
+        "motivo_saida",
+        "motivo_saida_detalhe",
+        "custos_entrada",
+        "custos_saida",
+        "resultado_bruto",
+        "resultado_pos_custos",
+        "imposto_estimado",
+        "resultado_pos_imposto_estimado"
+      ],
+      "properties": {
+        "operacao_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "simbolo": {
+          "$ref": "comum.v1.schema.json#/$defs/simbolo"
+        },
+        "horizonte_pregoes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_entrada": {
+          "$ref": "comum.v1.schema.json#/$defs/data"
+        },
+        "data_saida": {
+          "$ref": "comum.v1.schema.json#/$defs/data"
+        },
+        "preco_entrada": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "preco_saida": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "quantidade": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "motivo_saida": {
+          "$ref": "comum.v1.schema.json#/$defs/motivoSaida"
+        },
+        "motivo_saida_detalhe": {
+          "type": "object",
+          "minProperties": 1
+        },
+        "custos_entrada": {
+          "$ref": "comum.v1.schema.json#/$defs/reais"
+        },
+        "custos_saida": {
+          "$ref": "comum.v1.schema.json#/$defs/reais"
+        },
+        "resultado_bruto": {
+          "$ref": "comum.v1.schema.json#/$defs/resultado"
+        },
+        "resultado_pos_custos": {
+          "$ref": "comum.v1.schema.json#/$defs/resultado"
+        },
+        "imposto_estimado": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/reais"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null enquanto a apuracao mensal nao fechou"
+        },
+        "resultado_pos_imposto_estimado": {
+          "anyOf": [
+            {
+              "$ref": "comum.v1.schema.json#/$defs/resultado"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unevaluatedProperties": false
+}
