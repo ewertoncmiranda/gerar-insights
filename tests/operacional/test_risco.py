@@ -1,7 +1,13 @@
 """Testes do sizing teorico (OPR-INS-2).
 
-Capital de R$ 1 M como base: produz posicoes acima da posicao_minima (R$ 500)
-nos redutores mais agressivos sem exigir parametros artificiais.
+Formula: qtd_risco = (capital * risco_por_operacao) / (stop_atr * atr14).
+stop_reais = stop_atr * atr14 ja e R$/acao; dividir por ele diretamente da acoes.
+
+Defaults: capital=100k, preco=50, atr14=5
+  valor_risco = 100k * 0.005 = 500
+  stop_reais  = 2 * 5 = 10  (R$/acao)
+  qtd_risco   = 500 / 10 = 50 acoes  (abaixo de max_ativo=100, limite nao binda)
+  valor       = 50 * 50 = R$ 2.500 >= posicao_minima (R$ 500)
 """
 
 from decimal import Decimal
@@ -18,27 +24,20 @@ from app.operacional.risco import (
     calcular,
 )
 
-# Limites padrao DEC-OPR-1 (sem banco).
 _LIMITES = LimitesSizing.de_parametros({})
-
-# Capital teorico de R$ 1 M para que os redutores nao gerem posicoes abaixo do minimo.
-_CAP = Decimal("1000000")
+_CAP = Decimal("100000")
 
 
 def _calc(**kw):
-    """Atalho: preenche os defaults e deixa o teste sobrescrever so o que importa.
-
-    Com capital=1M, preco=50, atr14=1:
-      qtd_risco = (1_000_000 * 0.005) / (2 * 1 * 50) = 50 acoes => R$ 2.500
-    """
+    """Atalho com defaults que deixam qtd_risco=50 como limite (acima de posicao_minima)."""
     defaults = dict(
         capital=_CAP,
         caixa=_CAP,
         preco=Decimal("50"),
-        atr14=Decimal("1"),
+        atr14=Decimal("5"),         # stop_reais = 2*5 = 10; qtd_risco = 500/10 = 50
         faixa=ALTA,
         percentil_volatilidade=None,
-        vol21d=Decimal("10000000"),  # 1% de 10M = 100k / 50 = 2000 acoes > 50: nao limita
+        vol21d=Decimal("10000000"), # 1% de 10M = 100k / 50 = 2000 acoes > 50: nao limita
         exposicao_atual_ativo=Decimal("0"),
         exposicao_atual_setor=Decimal("0"),
         posicoes_abertas=0,
@@ -53,7 +52,6 @@ def _calc(**kw):
 # ---------------------------------------------------------------------------
 
 def test_caso_base_retorna_elegivel():
-    # qtd_risco = (1M*0.005)/(2*1*50) = 50 acoes; valor = 50*50 = R$ 2.500 >= R$ 500
     r = _calc()
     assert r.elegivel is True
     assert r.motivo_bloqueio is None
@@ -61,7 +59,7 @@ def test_caso_base_retorna_elegivel():
 
 
 def test_caso_base_quantidade():
-    # 50 acoes: inteira = 0 (< 100), fracionaria = 50, valor = 2_500
+    # qtd_risco=50 < max_ativo=100; inteira=0 (< 100), fracionaria=50, valor=2.500
     r = _calc()
     assert r.quantidade_inteira == 0
     assert r.quantidade_fracionaria == 50
@@ -69,7 +67,8 @@ def test_caso_base_quantidade():
 
 
 def test_arredondamento_lote_100_e_fracionario():
-    # preco=10, atr14=2: qtd_risco = 5000/(4*10) = 125 acoes => inteira=100, frac=25
+    # atr14=2: stop_reais=4; qtd_risco=500/4=125 acoes => inteira=100, frac=25
+    # preco=10: max_ativo=5%*100k/10=500 (nao limita)
     r = _calc(preco=Decimal("10"), atr14=Decimal("2"))
     assert r.elegivel is True
     assert r.quantidade_inteira == 100
@@ -77,10 +76,9 @@ def test_arredondamento_lote_100_e_fracionario():
     assert r.valor_financeiro == Decimal("1250")  # 125 * 10
 
 
-def test_quantidade_zero_quando_qtd_risco_fracionaria_zero():
-    # qtd_risco exatamente 100: inteira=100, fracionaria=0
-    # (1M*0.005)/(2*atr14*preco) = 100 => atr14*preco = 25 => preco=25, atr14=1
-    r = _calc(preco=Decimal("25"), atr14=Decimal("1"))
+def test_qtd_risco_exatamente_100():
+    # atr14=2.5: stop=5; qtd_risco=500/5=100 acoes => inteira=100, frac=0
+    r = _calc(preco=Decimal("25"), atr14=Decimal("2.5"))
     assert r.elegivel is True
     assert r.quantidade_inteira == 100
     assert r.quantidade_fracionaria == 0
@@ -110,8 +108,8 @@ def test_limite_posicoes_abertas_15_bloqueia():
 
 
 def test_posicao_abaixo_do_minimo():
-    # atr14=200 => stop = 400 => qtd_risco = 5000/(400*50) = 0.25 => 0 acoes => valor = 0
-    r = _calc(atr14=Decimal("200"))
+    # atr14=500: stop_reais=1000; qtd_risco=500/1000=0.5 => int=0 => valor=0
+    r = _calc(atr14=Decimal("500"))
     assert r.elegivel is False
     assert r.motivo_bloqueio == POSICAO_ABAIXO_DO_MINIMO
 
@@ -124,47 +122,46 @@ def test_caixa_insuficiente_bloqueia():
 
 
 # ---------------------------------------------------------------------------
-# Limites (passo 2 do algoritmo)
+# Limites (passo 2)
 # ---------------------------------------------------------------------------
 
 def test_limite_por_ativo_corta_quantidade():
-    # max_ativo = 5% * 1M = 50_000; com 49_000 alocados => espaco R$ 1.000 => 20 acoes
-    # qtd_risco = 50; min(50, 20) = 20 acoes; valor = 20*50 = R$ 1.000 >= R$ 500
-    r = _calc(exposicao_atual_ativo=Decimal("49000"))
+    # max_ativo = 5%*100k = 5000; exposicao=3000 => espaco=2000 => 2000/50=40 acoes
+    # min(50, 40) = 40; valor = 40*50 = R$ 2.000 >= R$ 500
+    r = _calc(exposicao_atual_ativo=Decimal("3000"))
     assert r.elegivel is True
-    assert r.quantidade_fracionaria == 20  # 1000/50 = 20
+    assert r.quantidade_fracionaria == 40
 
 
 def test_limite_por_ativo_quase_cheio():
-    # espaco R$ 500 => 10 acoes; min(50, 10) = 10; valor = 10*50 = R$ 500 >= R$ 500
-    r = _calc(exposicao_atual_ativo=Decimal("49500"))
+    # exposicao=4500 => espaco=500 => 10 acoes; valor=500 >= 500
+    r = _calc(exposicao_atual_ativo=Decimal("4500"))
     assert r.elegivel is True
     assert r.quantidade_fracionaria == 10
 
 
 def test_limite_por_setor_corta_quantidade():
-    # max_setor = 20% * 1M = 200_000; com 199_000 alocados => espaco R$ 1.000 => 20 acoes
-    r = _calc(exposicao_atual_setor=Decimal("199000"))
+    # max_setor = 20%*100k = 20000; exposicao_setor=18000 => espaco=2000 => 40 acoes
+    r = _calc(exposicao_atual_setor=Decimal("18000"))
     assert r.elegivel is True
-    assert r.quantidade_fracionaria == 20
+    assert r.quantidade_fracionaria == 40
 
 
 def test_limite_adtv_corta_quantidade():
-    # max_adtv = 1% * 150_000 = R$ 1.500 / 50 = 30 acoes; min(50, 30) = 30; valor = R$ 1.500
+    # max_adtv = 1%*150k = 1500 / 50 = 30 acoes; min(50, 30) = 30; valor=1.500
     r = _calc(vol21d=Decimal("150000"))
     assert r.elegivel is True
     assert r.quantidade_fracionaria == 30
 
 
 def test_sem_vol21d_nao_aplica_limite_adtv():
-    # sem vol21d: o cap de ADTV nao entra; qtd_risco = 50 prevalece
     r = _calc(vol21d=None)
     assert r.elegivel is True
     assert r.quantidade_fracionaria == 50
 
 
 def test_caixa_parcialmente_alocado_limita():
-    # caixa = 500: valor max = 500; 500/50 = 10 acoes; min(50, 10) = 10
+    # caixa=500: qtd_teto=10 acoes; valor=500 >= 500
     r = _calc(caixa=Decimal("500"))
     assert r.elegivel is True
     assert r.quantidade_fracionaria == 10
@@ -175,7 +172,7 @@ def test_caixa_parcialmente_alocado_limita():
 # ---------------------------------------------------------------------------
 
 def test_redutor_liquidez_media():
-    # faixa MEDIA: qtd=50 * 0.5 = 25 acoes fracionarias; valor = 25*50 = R$ 1.250
+    # 50 * 0.5 = 25 acoes fracionarias; valor = 25*50 = R$ 1.250
     r = _calc(faixa=MEDIA)
     assert "LIQUIDEZ_MEDIA" in r.redutores_aplicados
     assert r.quantidade_fracionaria == 25
@@ -183,7 +180,7 @@ def test_redutor_liquidez_media():
 
 
 def test_redutor_volatilidade_p80():
-    # percentil 0.85: qtd=50 * 0.75 = 37 acoes; valor = R$ 1.850
+    # 50 * 0.75 = 37 acoes; valor = R$ 1.850
     r = _calc(percentil_volatilidade=Decimal("0.85"))
     assert "VOL_P80" in r.redutores_aplicados
     assert r.quantidade_fracionaria == 37
@@ -191,7 +188,7 @@ def test_redutor_volatilidade_p80():
 
 
 def test_dois_redutores_combinados():
-    # MEDIA + VOL_P80: 50 * 0.5 * 0.75 = 18.75 => 18 acoes; valor = R$ 900
+    # 50 * 0.5 * 0.75 = 18.75 => 18 acoes; valor = R$ 900
     r = _calc(faixa=MEDIA, percentil_volatilidade=Decimal("0.90"))
     assert set(r.redutores_aplicados) == {"LIQUIDEZ_MEDIA", "VOL_P80"}
     assert r.quantidade_fracionaria == 18
@@ -206,8 +203,8 @@ def test_percentil_exato_80_nao_aplica_redutor():
 
 
 def test_faixa_insuficiente_nao_bloqueia_sizing():
-    # elegibilidade.py ja filtra INSUFICIENTE antes de chamar risco.py;
-    # o sizing nao rejeita por faixa: responsabilidade do servico (OPR-INS-4)
+    # elegibilidade.py filtra INSUFICIENTE antes de chamar risco.py;
+    # o sizing nao rejeita por faixa
     r = _calc(faixa=INSUFICIENTE)
     assert r.elegivel is True
 
@@ -221,8 +218,9 @@ def test_posicao_aberta_14_nao_bloqueia():
 
 
 def test_posicao_aberta_15_bloqueia():
-    assert _calc(posicoes_abertas=15).elegivel is False
-    assert _calc(posicoes_abertas=15).motivo_bloqueio == LIMITE_POSICOES_ABERTAS
+    r = _calc(posicoes_abertas=15)
+    assert r.elegivel is False
+    assert r.motivo_bloqueio == LIMITE_POSICOES_ABERTAS
 
 
 # ---------------------------------------------------------------------------
@@ -246,26 +244,29 @@ def test_parametros_customizados_sobrescrevem():
     lim = LimitesSizing.de_parametros({"sizing": {"max_posicoes": 10, "posicao_minima": "1000"}})
     assert lim.max_posicoes == 10
     assert lim.posicao_minima == Decimal("1000")
-    assert lim.risco_por_operacao == Decimal("0.005")  # default preservado
+    assert lim.risco_por_operacao == Decimal("0.005")
 
 
-def test_capital_de_100k_com_posicao_minima_menor_funciona():
-    # Verifica que capital menor + posicao_minima menor -> elegivel
-    lim = LimitesSizing.de_parametros({"sizing": {"posicao_minima": "100"}})
+def test_formula_abev3_like():
+    # Reproduz o cenario do relato: patrimonio=100k, ATR14=0.352, preco=11.58
+    # qtd_risco = 500 / (2 * 0.352) = 500 / 0.704 ≈ 710 acoes
+    # max_ativo = 5%*100k / 11.58 ≈ 431 acoes => limite binda em 431
+    # valor = 431 * 11.58 ≈ R$ 4.991 >= R$ 500 => elegivel
+    lim = LimitesSizing.de_parametros({})
     r = calcular(
         capital=Decimal("100000"),
         caixa=Decimal("100000"),
-        preco=Decimal("50"),
-        atr14=Decimal("1"),
+        preco=Decimal("11.58"),
+        atr14=Decimal("0.352"),
         faixa=ALTA,
         percentil_volatilidade=None,
-        vol21d=Decimal("10000000"),
+        vol21d=Decimal("50000000"),
         exposicao_atual_ativo=Decimal("0"),
         exposicao_atual_setor=Decimal("0"),
         posicoes_abertas=0,
         limites=lim,
     )
     assert r.elegivel is True
-    # qtd_risco = (100k*0.005)/(2*1*50) = 5 acoes; valor = R$ 250 >= R$ 100
-    assert r.quantidade_fracionaria == 5
-    assert r.valor_financeiro == Decimal("250")
+    # qtd_risco = 500 / 0.704 ≈ 710 => max_ativo = 5000/11.58 ≈ 431 (limite)
+    qtd_max_ativo = int(Decimal("5000") / Decimal("11.58"))  # 431
+    assert r.quantidade_inteira + r.quantidade_fracionaria == qtd_max_ativo

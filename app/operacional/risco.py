@@ -117,9 +117,10 @@ def calcular(
                                0, 0, _zero, [])
 
     # --- 1. quantidade pelo risco ---
+    # stop_reais ja e R$/acao (diferenca de preco); divide direto: R$ / (R$/acao) = acoes.
     valor_risco = capital * limites.risco_por_operacao
     stop_reais = limites.stop_atr * atr14
-    qtd_risco = valor_risco / (stop_reais * preco) if preco > _zero else _zero
+    qtd_risco = valor_risco / stop_reais
 
     # --- 2. limites ---
     max_ativo_reais = limites.exposicao_max_ativo * capital - exposicao_atual_ativo
