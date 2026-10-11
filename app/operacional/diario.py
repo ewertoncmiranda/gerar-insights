@@ -42,6 +42,10 @@ ESPERA_ENTRADA = 5  # pregoes que uma entrada PENDENTE espera o ativo negociar a
 LOTE = 100
 HORIZONTES = (21, 63, 126)
 D0 = Decimal(0)
+# Bloqueio de entrada gravado em evento_operacional (sem contrato v1: so trilha, o gestor le da tabela).
+BLOQUEIO_LIQUIDEZ, BLOQUEIO_DADO = "BLOQUEIO_LIQUIDEZ", "BLOQUEIO_DADO"
+MOTIVOS_DE_LIQUIDEZ = {"SEM_METRICA_LIQUIDEZ", "HISTORICO_INSUFICIENTE", "VOLUME_BAIXO", "NEGOCIOS_BAIXOS",
+                       "PRESENCA_BAIXA", "SPREAD_ALTO", "SPREAD_AUSENTE"}
 
 
 def aliquota_ir_renda_fixa(dias_corridos: int) -> Decimal:
@@ -256,11 +260,18 @@ class DiarioOperacional:
             reservado += valor_previsto
         candidatos = []
         for e in elegibilidade:
-            if not e.elegivel or e.simbolo in ocupados:
+            if e.simbolo in ocupados:
                 continue
             horizonte = next((h for h in HORIZONTES if opinioes.get((e.simbolo, h)) == POSITIVO), None)
-            if horizonte:
+            if horizonte and e.elegivel:
                 candidatos.append((e, horizonte))
+            elif horizonte:
+                # Sinal positivo barrado pela elegibilidade: trilha para GET /operacional/bloqueios (gestor).
+                tipo = BLOQUEIO_LIQUIDEZ if any(m.codigo in MOTIVOS_DE_LIQUIDEZ for m in e.bloqueios) else BLOQUEIO_DADO
+                repo.evento(db, versao, tipo, p, {
+                    "simbolo": e.simbolo, "faixa": e.faixa, "horizonte_pregoes": horizonte,
+                    "motivos": [{"codigo": m.codigo, "detalhe": m.detalhe, "valor": m.valor, "limite": m.limite}
+                                for m in e.bloqueios]}, e.simbolo)
         candidatos.sort(key=lambda par: (par[0].faixa != ALTA, -float(par[0].metricas.get("volume_financeiro_medio_63d") or 0)))
         precos = repo.cotacoes(db, p, {e.simbolo for e, _ in candidatos})
         posicoes_abertas = len(em_carteira) + len(pendentes)
