@@ -16,7 +16,7 @@ Em cada pregao P (so dados com data <= P; execucao sempre na ABERTURA, nunca no 
    do patrimonio) e rateado nas operacoes com lucro (`imposto_estimado`, `resultado_pos_imposto_estimado`);
 7. patrimonio no fechamento (liquido da provisao de IR), retorno bruto/liquido, CDI bruto e liquido
    de IR, excesso e drawdown.
-Status pela trava (OPR-INS-6) ainda nao entra: status EM_OBSERVACAO.
+Status calculado pela trava de operabilidade (OPR-INS-6, `status.py`).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import ROUND_FLOOR, Decimal
 
-from app.operacional import ir, risco, saida
+from app.operacional import ir, risco, saida, status as _status_mod
 from app.operacional.custos import custo_por_lado
 from app.operacional.elegibilidade import ALTA, INSUFICIENTE, LimitesLiquidez, faixa_de_liquidez
 from app.operacional.repositorio import RepositorioOperacional
@@ -41,7 +41,6 @@ POSITIVO = "SINAL_POSITIVO"
 ESPERA_ENTRADA = 5  # pregoes que uma entrada PENDENTE espera o ativo negociar antes de ser cancelada
 LOTE = 100
 HORIZONTES = (21, 63, 126)
-STATUS_COLETA = "EM_OBSERVACAO"  # OPR-INS-6 decide o status de verdade
 D0 = Decimal(0)
 
 
@@ -319,10 +318,25 @@ class DiarioOperacional:
             "excesso_sobre_cdi_liquido": _q(ret_acum - cdi_liq, q8),
             "drawdown": _q(drawdown, q8), "drawdown_maximo": _q(dd_max, q8),
             "imposto_estimado_mes": _q(provisao["hoje"]), "violacoes_liquidez": 0,
-            "status_sistema": STATUS_COLETA,
-            "motivos_status_json": {"motivo": "coleta em andamento; trava de operabilidade na OPR-INS-6",
-                                    "pregoes_no_diario": bisect_right(mercado, p) - bisect_left(mercado, inicio)},
         }
+        pregoes_no_diario = bisect_right(mercado, p) - bisect_left(mercado, inicio)
+        total_fechadas = len(repo.operacoes_fechadas(db, versao, p))
+        st = _status_mod.calcular(
+            pregoes_no_diario=pregoes_no_diario,
+            retorno_liquido_acumulado=ret_acum,
+            cdi_liquido_ir_acumulado=cdi_liq,
+            drawdown_maximo=dd_max,
+            violacoes_liquidez_total=0,
+            operacoes_encerradas=total_fechadas,
+            parametros=_status_mod.ParametrosTrava.de_parametros(parametros),
+        )
+        linha.update({
+            "status_sistema": st.status,
+            "motivos_status_json": {
+                "motivos": [{"codigo": c, "descricao": c} for c in st.criterios_nao_atendidos],
+                "pregoes_no_diario": st.pregoes_avaliados,
+            },
+        })
         repo.gravar_diario(db, versao, linha)
         repo.evento(db, versao, "DIARIO_AVALIADO", p, {k: str(v) for k, v in linha.items() if k != "motivos_status_json"})
         log.info("Diario %s | patrimonio=%s | caixa=%s | abertas=%d | novas pendentes=%d", p, patrimonio, _q(caixa),
@@ -369,11 +383,16 @@ def main() -> int:
     """Etapa da rotina da manha (`cargas-etl.ps1`): sem argumentos, processa os pregoes novos."""
     from app.config.config_logger import setup_logger  # noqa: PLC0415
     from app.config.database_config import ConfigDatabase  # noqa: PLC0415
+    from app.operacional.eventos import publicar_pendentes  # noqa: PLC0415
 
     logger = setup_logger()
-    resumo = DiarioOperacional().executar(ConfigDatabase().session)
+    db_config = ConfigDatabase()
+    resumo = DiarioOperacional().executar(db_config.session)
     logger.info("Diario operacional | pregoes=%d | abertas=%d | fechadas=%d | pendentes=%d | canceladas=%d",
                 len(resumo.pregoes), resumo.abertas, resumo.fechadas, resumo.pendentes, resumo.canceladas)
+    with db_config.session() as db:
+        publicacao = publicar_pendentes(db)
+    logger.info("Eventos operacionais | %s", publicacao)
     return 0
 
 
