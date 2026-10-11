@@ -21,6 +21,7 @@ from datetime import date
 from sqlalchemy import bindparam, text
 
 from app.operacional.elegibilidade import Elegibilidade
+from app.operacional.eventos_v2 import registrar_saida
 from app.operacional.repositorio import RepositorioOperacional
 from app.operacional.snapshot import EntradaSnapshot, montar_snapshot
 from app.operacional.servico import avaliar_pregao
@@ -261,6 +262,8 @@ class OperabilidadeV2:
             snapshot = montar_snapshot(entrada)
             self.repo.salvar_snapshot(db, snapshot)
             self.repo.salvar_timeline(db, simbolo, versao, timeline)
+            # OPRV2-INS-6: o que mudou deste ativo vai para a saida v2 (publicada no fim do diario).
+            registrar_saida(db, snapshot, timeline, versao, data_pregao)
             total += 1
         log.info("Operabilidade V2: snapshots=%d data=%s", total, data_pregao)
         return total

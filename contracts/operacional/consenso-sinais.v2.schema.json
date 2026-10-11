@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/consenso-sinais.v2.schema.json",
+  "title": "Consenso de sinais v2",
+  "$ref": "comum.v2.schema.json#/$defs/consenso"
+}

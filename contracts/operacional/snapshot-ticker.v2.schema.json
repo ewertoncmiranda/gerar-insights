@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/snapshot-ticker.v2.schema.json",
+  "title": "Snapshot operacional por ticker v2",
+  "type": "object",
+  "required": ["schemaVersion", "simbolo", "dataPregao", "versaoRegra", "statusOperacional", "faixaLiquidez", "sinalTecnico", "confiancaFaixa", "motivosBloqueio", "consenso", "tese"],
+  "properties": {
+    "schemaVersion": { "const": "operacional.snapshot-ticker.v2" },
+    "simbolo": { "$ref": "comum.v2.schema.json#/$defs/simbolo" },
+    "dataPregao": { "type": "string", "format": "date" },
+    "versaoRegra": { "$ref": "comum.v2.schema.json#/$defs/versaoRegra" },
+    "statusOperacional": { "$ref": "comum.v2.schema.json#/$defs/statusOperacional" },
+    "faixaLiquidez": { "$ref": "comum.v2.schema.json#/$defs/faixaLiquidez" },
+    "setorGrupo": { "type": ["string", "null"] },
+    "sinalPrincipal": { "$ref": "comum.v2.schema.json#/$defs/sinal" },
+    "sinalTecnico": {
+      "type": "object", "required": ["momentum", "reversao"],
+      "properties": { "momentum": { "$ref": "comum.v2.schema.json#/$defs/sinal" }, "reversao": { "$ref": "comum.v2.schema.json#/$defs/sinal" } },
+      "additionalProperties": false
+    },
+    "sinalV2Sombra": { "$ref": "comum.v2.schema.json#/$defs/sinal" },
+    "opiniaoIa": { "type": ["string", "null"] },
+    "confiancaScore": { "type": ["number", "integer", "null"], "minimum": 0, "maximum": 100 },
+    "confiancaFaixa": { "enum": ["ALTA", "MEDIA", "BAIXA", "NAO_CALIBRADA"] },
+    "posicao": { "type": ["object", "null"] },
+    "ultimoEvento": { "type": ["object", "null"] },
+    "motivosBloqueio": { "type": "array", "items": { "$ref": "comum.v2.schema.json#/$defs/motivoBloqueio" } },
+    "consenso": { "$ref": "comum.v2.schema.json#/$defs/consenso" },
+    "tese": { "$ref": "comum.v2.schema.json#/$defs/tese" }
+  },
+  "additionalProperties": false
+}
