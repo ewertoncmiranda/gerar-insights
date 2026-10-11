@@ -42,6 +42,15 @@ ESPERA_ENTRADA = 5  # pregoes que uma entrada PENDENTE espera o ativo negociar a
 LOTE = 100
 HORIZONTES = (21, 63, 126)
 D0 = Decimal(0)
+# Codigo estavel (contrato diario-avaliado.v1: ^[A-Z][A-Z0-9_]*$) para o texto do status.py.
+_CODIGOS_STATUS = {"pregoes": "AMOSTRA_INSUFICIENTE", "operacoes_encerradas": "POUCAS_OPERACOES_ENCERRADAS",
+                   "retorno_liq": "ABAIXO_DO_CDI_LIQUIDO", "drawdown_maximo": "DRAWDOWN_ACIMA_DO_LIMITE",
+                   "violacoes_liquidez": "VIOLACAO_LIQUIDEZ"}
+
+
+def codigo_do_motivo(texto: str) -> str:
+    chave = texto.split("=", 1)[0].strip()
+    return _CODIGOS_STATUS.get(chave) or ("".join(c if c.isalnum() else "_" for c in chave).upper() or "MOTIVO_STATUS")
 # Bloqueio de entrada gravado em evento_operacional (sem contrato v1: so trilha, o gestor le da tabela).
 BLOQUEIO_LIQUIDEZ, BLOQUEIO_DADO = "BLOQUEIO_LIQUIDEZ", "BLOQUEIO_DADO"
 MOTIVOS_DE_LIQUIDEZ = {"SEM_METRICA_LIQUIDEZ", "HISTORICO_INSUFICIENTE", "VOLUME_BAIXO", "NEGOCIOS_BAIXOS",
@@ -344,7 +353,7 @@ class DiarioOperacional:
         linha.update({
             "status_sistema": st.status,
             "motivos_status_json": {
-                "motivos": [{"codigo": c, "descricao": c} for c in st.criterios_nao_atendidos],
+                "motivos": [{"codigo": codigo_do_motivo(c), "descricao": c} for c in st.criterios_nao_atendidos],
                 "pregoes_no_diario": st.pregoes_avaliados,
             },
         })
