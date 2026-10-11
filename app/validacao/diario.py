@@ -29,6 +29,7 @@ from logging import Logger
 
 from app.core.analysis.regra_v2 import VERSAO_REGRA_V2, EntradaV2, posicao_no_range, recomendar_v2
 from app.validacao.avaliador import HORIZONTES_PREGOES, avaliar
+from app.validacao.confianca import CurvaConfianca, curva_real
 
 # B3 em horario de Brasilia (UTC-3, sem horario de verao desde 2019); o banco
 # grava data_analise em UTC. Abertura do pregao a vista: 10h.
@@ -107,6 +108,7 @@ class ResumoRegistro:
 class ResumoAvaliacao:
     resultados_gravados: int = 0
     sinais_pendentes: int = 0
+    curva_confianca: CurvaConfianca | None = None
 
 
 class DiarioDeSinais:
@@ -194,38 +196,38 @@ class DiarioDeSinais:
         resumo = ResumoAvaliacao()
         with self._sessao() as db:
             pendentes = self._repo.sinais_com_horizonte_pendente(db, len(self._horizontes))
-            if not pendentes:
-                return resumo
+            if pendentes:
+                desde = min(s["data_pregao"] for s in pendentes)
+                cdi = self._repo.cdi_diario(db, desde)
+                # Uma consulta so: a mesma carteira serve de serie do proprio
+                # sinal e de regua (media simples) para todos os sinais.
+                carteira = self._repo.series_da_carteira(db, desde)
+                proventos_por_papel = self._repo.proventos_por_papel(db)
 
-            desde = min(s["data_pregao"] for s in pendentes)
-            cdi = self._repo.cdi_diario(db, desde)
-            # Uma consulta so: a mesma carteira serve de serie do proprio
-            # sinal e de regua (media simples) para todos os sinais.
-            carteira = self._repo.series_da_carteira(db, desde)
-            proventos_por_papel = self._repo.proventos_por_papel(db)
-
-            for sinal in pendentes:
-                serie = carteira.get(sinal["simbolo"], [])
-                feitos = self._repo.horizontes_avaliados(db, sinal["id"])
-                ainda_falta = False
-                for horizonte in self._horizontes:
-                    if horizonte in feitos:
-                        continue
-                    resultado = avaliar(
-                        sinal["data_pregao"], sinal["recomendacao"], serie, horizonte,
-                        carteira=carteira, cdi_diario=cdi,
-                        proventos=proventos_por_papel.get(sinal["simbolo"], {}),
-                        proventos_carteira=proventos_por_papel,
-                        media_carteira_pronta=None,
-                    )
-                    if resultado is None:
-                        ainda_falta = True
-                        continue
-                    self._repo.inserir_resultado(db, sinal["id"], resultado)
-                    resumo.resultados_gravados += 1
-                if ainda_falta:
-                    resumo.sinais_pendentes += 1
-            db.commit()
+                for sinal in pendentes:
+                    serie = carteira.get(sinal["simbolo"], [])
+                    feitos = self._repo.horizontes_avaliados(db, sinal["id"])
+                    ainda_falta = False
+                    for horizonte in self._horizontes:
+                        if horizonte in feitos:
+                            continue
+                        resultado = avaliar(
+                            sinal["data_pregao"], sinal["recomendacao"], serie, horizonte,
+                            carteira=carteira, cdi_diario=cdi,
+                            proventos=proventos_por_papel.get(sinal["simbolo"], {}),
+                            proventos_carteira=proventos_por_papel,
+                            media_carteira_pronta=None,
+                        )
+                        if resultado is None:
+                            ainda_falta = True
+                            continue
+                        self._repo.inserir_resultado(db, sinal["id"], resultado)
+                        resumo.resultados_gravados += 1
+                    if ainda_falta:
+                        resumo.sinais_pendentes += 1
+                db.commit()
+            amostras = self._repo.amostras_confianca(db)
+            resumo.curva_confianca = curva_real(amostras)
         return resumo
 
 
@@ -280,6 +282,12 @@ def main(argv: list[str] | None = None) -> int:
         "Avaliacao do diario | resultados gravados=%d | sinais ainda pendentes=%d",
         r.resultados_gravados, r.sinais_pendentes,
     )
+    if r.curva_confianca is not None:
+        faixas_com_dados = [(f.faixa, f.taxa_acerto) for f in r.curva_confianca.faixas if f.direcionais > 0]
+        logger.info(
+            "Curva de confianca | direcionais=%d tem_evidencia=%s faixas=%s",
+            r.curva_confianca.direcionais, r.curva_confianca.tem_evidencia_real, faixas_com_dados,
+        )
     return 0
 
 
