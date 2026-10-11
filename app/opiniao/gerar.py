@@ -262,6 +262,17 @@ def executar(db, logger: Logger, data_pregao: date | None, simbolos: list[str] |
     return resumo
 
 
+PREGOES_RECUPERAVEIS = 5
+
+
+def executar_rotina(db, logger: Logger, servico: ServicoIA | None, lote_max_gemini: int = 25) -> list[Resumo]:
+    """Etapa da rotina da manha (sem --data): opina, do mais antigo ao mais novo, os pregoes com
+    insight que ainda nao tem opiniao entre os ultimos PREGOES_RECUPERAVEIS. Nada novo: nao faz nada."""
+    pendentes = RepositorioOpiniao().pregoes_sem_opiniao(db, PREGOES_RECUPERAVEIS)
+    if not pendentes:
+        logger.info("Opiniao: nenhum pregao com insight sem opiniao nos ultimos %d", PREGOES_RECUPERAVEIS)
+    return [executar(db, logger, d, None, servico, lote_max_gemini=lote_max_gemini) for d in pendentes]
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Opiniao por horizonte (servico de IA)")
     parser.add_argument("--data", type=date.fromisoformat, help="pregao (padrao: o ultimo com insight)")
@@ -278,15 +289,24 @@ def main(argv: list[str] | None = None) -> int:
     cfg = Settings()
     servico = None if argumentos.sem_llm else ServicoIA(cfg.ia_url, timeout_s=cfg.ia_timeout_s)
     with ConfigDatabase().session() as db:
-        r = executar(db, logger, argumentos.data, argumentos.simbolo, servico,
-                     lote_max_gemini=cfg.lote_max_gemini, sem_limite=argumentos.sem_limite)
+        if argumentos.data is None and not argumentos.simbolo and not argumentos.sem_limite:
+            resumos = executar_rotina(db, logger, servico, lote_max_gemini=cfg.lote_max_gemini)
+        else:
+            resumos = [executar(db, logger, argumentos.data, argumentos.simbolo, servico,
+                                lote_max_gemini=cfg.lote_max_gemini, sem_limite=argumentos.sem_limite)]
+    for r in resumos:
+        _registrar_resumo(logger, r)
+    return 0
+
+
+def _registrar_resumo(logger: Logger, r: Resumo) -> None:
     logger.info(
         "Opiniao %s | ativos=%d | priorizados=%d | chamadas=%d | gravadas=%d | ja existiam=%d | "
         "reaproveitadas=%d | sem_cota=%d | modelo=%d | regra=%d | falhas_do_servico=%d | sem insight=%s",
         r.data_pregao, r.ativos, r.priorizados, r.chamadas, r.gravadas, r.ja_existiam,
         r.reaproveitadas, r.sem_cota, r.do_modelo, r.de_regra, r.falhas_do_servico, r.sem_insight,
     )
-    return 0
+
 
 
 if __name__ == "__main__":
