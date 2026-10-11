@@ -20,12 +20,13 @@ Recalcular tudo a partir das operacoes fechadas da o mesmo resultado: idempotent
 from __future__ import annotations
 
 import json
-import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+
+from app.config.settings import Settings
 
 RAIZ = Path(__file__).resolve().parents[2]
 REGRAS_PADRAO = "ir/2026.json"
@@ -94,7 +95,7 @@ class RegrasIR:
 
 def carregar_regras(caminho: str | None = None) -> RegrasIR:
     """`OPERACIONAL_REGRAS_IR` ou `regra_operacional.regras_ir_versao`, relativo a raiz do repo."""
-    arquivo = Path(caminho or os.getenv("OPERACIONAL_REGRAS_IR", REGRAS_PADRAO))
+    arquivo = Path(caminho or Settings().operacional_regras_ir or REGRAS_PADRAO)
     if not arquivo.is_absolute():
         arquivo = RAIZ / arquivo
     dados = json.loads(arquivo.read_text(encoding="utf-8"))

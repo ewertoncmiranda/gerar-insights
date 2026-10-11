@@ -3,9 +3,9 @@ quem chama e o diario operacional (OPR-INS-4), dentro da rotina diaria."""
 
 from __future__ import annotations
 
-import os
 from datetime import date
 
+from app.config.settings import Settings
 from app.operacional.elegibilidade import Elegibilidade, FatosDoAtivo, LimitesLiquidez, avaliar
 from app.operacional.repositorio import RepositorioOperacional
 
@@ -13,7 +13,7 @@ VERSAO_REGRA_PADRAO = "OPR-2026.10.10-1"
 
 
 def versao_regra() -> str:
-    return os.getenv("OPERACIONAL_VERSAO_REGRA", VERSAO_REGRA_PADRAO)
+    return Settings().operacional_versao_regra or VERSAO_REGRA_PADRAO
 
 
 def avaliar_pregao(db, data_pregao: date | None = None, simbolos: list[str] | None = None,

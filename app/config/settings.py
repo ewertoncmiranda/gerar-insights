@@ -76,6 +76,9 @@ class Settings:
             'false',
             'no',
         }
+        self.operacional_versao_regra = os.getenv('OPERACIONAL_VERSAO_REGRA', 'OPR-2026.10.10-1')
+        self.operacional_regras_ir = os.getenv('OPERACIONAL_REGRAS_IR', 'ir/2026.json')
+        self.eventos_operacionais_queue = os.getenv('EVENTOS_OPERACIONAIS_QUEUE', 'sqs-eventos-operacionais')
 
     def _normalize_local_database_host(self):
         if self.is_docker:
