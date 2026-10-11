@@ -39,7 +39,19 @@ class RepositorioDiario:
             "(SELECT MIN(data_pregao) FROM opiniao_ia))")).scalar()
 
     def ultimo_pregao_com_liquidez(self, db) -> date | None:
-        return db.execute(text("SELECT MAX(data_pregao) FROM ativo_liquidez_diaria")).scalar()
+        """Ate onde o diario pode ir: o ultimo pregao com prontidao SUCESSO do ETL (OPR-ETL-5).
+
+        Sem nenhum registro de prontidao (ETL anterior a OPR-ETL-5), o ultimo pregao com liquidez."""
+        liquidez = db.execute(text("SELECT MAX(data_pregao) FROM ativo_liquidez_diaria")).scalar()
+        tem_prontidao = db.execute(text(
+            "SELECT 1 FROM etl_execucao WHERE fonte = 'PRONTIDAO_OPR' LIMIT 1")).scalar()
+        if not tem_prontidao or liquidez is None:
+            return liquidez
+        pronto = db.execute(text(
+            "SELECT MAX(competencia) FROM etl_execucao WHERE fonte = 'PRONTIDAO_OPR' AND status = 'SUCESSO'")).scalar()
+        if pronto is None:
+            return None
+        return min(liquidez, date.fromisoformat(str(pronto)[:10]))
 
     def cotacoes(self, db, data_pregao: date, simbolos: set[str]) -> dict[str, dict]:
         if not simbolos:
