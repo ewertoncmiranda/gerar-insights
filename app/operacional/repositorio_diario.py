@@ -116,6 +116,13 @@ class RepositorioDiario:
         return ops
 
     # ---- escrita -------------------------------------------------------------------------------
+    def operacoes_fechadas(self, db, versao: str, ate: date) -> list[dict]:
+        """Operacoes FECHADA com saida ate o pregao (base da apuracao mensal do IR, OPR-INS-5)."""
+        return [dict(r) for r in db.execute(text(
+            "SELECT id, simbolo, data_entrada, data_saida, preco_saida, quantidade, resultado_pos_custos "
+            "FROM operacao_simulada WHERE versao_regra = :v AND status = 'FECHADA' AND data_saida <= :d "
+            "ORDER BY data_saida, id"), {"v": versao, "d": ate}).mappings()]
+
     def inserir_pendente(self, db, versao: str, op: dict) -> int:
         resultado = db.execute(text(
             "INSERT IGNORE INTO operacao_simulada (versao_regra, simbolo, setor_grupo, horizonte_pregoes, status, "

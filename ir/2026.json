@@ -1,0 +1,27 @@
+{
+  "versao": "ir/2026.json",
+  "descricao": "Regras fiscais estimadas do paper trading (OPR-INS-5, DEC-OPR-1). Estimativa para comparar com o CDI liquido; nao e calculo oficial nem orientacao tributaria.",
+  "conferido_em": "2026-10-11",
+  "conferir_antes_de_ligar": [
+    "Isencao de R$ 20 mil/mes para acoes (Lei 11.033/2004, art. 3o, I) e compensacao de prejuizo em mes isento (Perguntas e Respostas IRPF da RFB).",
+    "Retencao sobre dividendos acima de R$ 50 mil/mes da mesma empresa (reforma do IR vigente em 2026): proventos ainda nao entram no diario."
+  ],
+  "vigencias": [
+    {
+      "vigente_desde": "2016-01-01",
+      "operacao_comum": {
+        "aliquota": 0.15,
+        "isencao_vendas_mes": 20000,
+        "irrf_sobre_vendas": 0.00005,
+        "prejuizo_em_mes_isento_compensa": true,
+        "darf_minimo": 10
+      },
+      "day_trade": {"aliquota": 0.20, "violacao": true},
+      "classes": {
+        "ACAO": {"sufixos": ["3", "4", "5", "6", "7", "8"], "isencao": true},
+        "UNIT_OU_FUNDO": {"sufixos": ["11"], "isencao": false, "nota": "unit, ETF ou FII: sem a isencao de R$ 20 mil (conservador)"},
+        "BDR": {"sufixos": ["32", "33", "34", "35", "39"], "isencao": false}
+      }
+    }
+  ]
+}
