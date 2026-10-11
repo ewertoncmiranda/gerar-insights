@@ -359,9 +359,18 @@ class DiarioOperacional:
         })
         repo.gravar_diario(db, versao, linha)
         repo.evento(db, versao, "DIARIO_AVALIADO", p, {k: str(v) for k, v in linha.items() if k != "motivos_status_json"})
+        self._operabilidade_v2(db, p, versao)
         log.info("Diario %s | patrimonio=%s | caixa=%s | abertas=%d | novas pendentes=%d", p, patrimonio, _q(caixa),
                  len(em_carteira), resumo.pendentes)
 
+    def _operabilidade_v2(self, db, p: date, versao: str) -> None:
+        """OPRV2-INS-1..4: roda dentro do diario e nao exige comando manual.
+
+        Enquanto a infra nao entregar as tabelas V2, a camada faz no-op seguro.
+        """
+        from app.operacional.v2 import OperabilidadeV2  # noqa: PLC0415
+
+        OperabilidadeV2().atualizar_pregao(db, p, versao)
 
     # ---------------------------------------------------------------------------------------------
     def _imposto(self, db, p: date, mercado: list[date], indice_p: int, tem_anterior: bool
