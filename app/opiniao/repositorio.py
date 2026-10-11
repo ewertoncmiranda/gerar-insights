@@ -88,6 +88,18 @@ class RepositorioOpiniao:
         ).scalar()
         return date.fromisoformat(str(valor)[:10]) if valor else None
 
+    def pregoes_sem_opiniao(self, db, limite: int = 5) -> list[date]:
+        """Dos ultimos `limite` pregoes com insight, os que ainda nao tem nenhuma opiniao (crescente).
+
+        E o que deixa a rotina recuperar sozinha um dia de maquina desligada (DEC-AGT-1)."""
+        datas = [date.fromisoformat(str(d)[:10]) for (d,) in db.execute(text(
+            "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(detalhes_json, '$.data_pregao_referencia')) d "
+            "FROM insight_acao WHERE recomendacao <> 'SEM_DADOS' ORDER BY d DESC LIMIT :n"), {"n": limite}) if d]
+        if not datas:
+            return []
+        com_opiniao = {d for (d,) in db.execute(
+            text("SELECT DISTINCT data_pregao FROM opiniao_ia WHERE data_pregao >= :i"), {"i": min(datas)})}
+        return sorted(d for d in datas if d not in com_opiniao)
     def ja_existe(self, db, simbolo: str, data_pregao: date, horizonte: int, modelo: str,
                   versao_prompt: str) -> bool:
         return db.execute(
