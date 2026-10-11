@@ -45,6 +45,8 @@ As variáveis principais são:
 - `DB_DRIVER`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS` e `DB_NAME`;
 - `RETRY_ATTEMPTS`, `RETRY_DELAY` e `LOG_LEVEL`;
 - `METRICS_ENABLED` e `METRICS_PORT` para `/health` e `/metrics`.
+- `OPERACIONAL_VERSAO_REGRA`, `OPERACIONAL_REGRAS_IR` e
+  `EVENTOS_OPERACIONAIS_QUEUE` para o plano OPR/paper trading simulado.
 
 Em execução local, `DB_HOST` e `LOCALSTACK_ENDPOINT` normalmente apontam para
 `localhost`. Dentro da rede Docker do ecossistema, use os nomes dos serviços.

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -24,6 +23,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from sqlalchemy import bindparam, text
+
+from app.config.settings import Settings
 
 log = logging.getLogger("operacional")
 
@@ -165,7 +166,7 @@ def publicar_pendentes(db, cliente_sqs=None, fila: str | None = None) -> dict:
 
         cliente_sqs = AwsConfig().get_sqs_client()
     try:
-        url = cliente_sqs.get_queue_url(QueueName=fila or os.getenv("EVENTOS_OPERACIONAIS_QUEUE", FILA_PADRAO))["QueueUrl"]
+        url = cliente_sqs.get_queue_url(QueueName=fila or Settings().eventos_operacionais_queue or FILA_PADRAO)["QueueUrl"]
     except Exception as erro:  # noqa: BLE001 - fila ainda nao provisionada ou LocalStack fora: tenta na proxima rotina
         log.warning("Eventos operacionais: fila indisponivel (%s); %d ficam pendentes", erro, len(eventos))
         resumo["pendentes"] = len(eventos)
