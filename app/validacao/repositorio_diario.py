@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import text
 
 from app.validacao.avaliador import Pregao, ResultadoHorizonte
+from app.validacao.confianca import AmostraConfianca
 from app.validacao.proventos import agrupar_por_papel_e_data
 
 
@@ -92,6 +93,46 @@ class RepositorioDiario:
             text("SELECT horizonte FROM sinal_resultado WHERE sinal_id = :id"), {"id": sinal_id}
         )
         return {h for (h,) in linhas}
+
+    def amostras_confianca(
+        self,
+        db,
+        *,
+        versao_regra: str | None = None,
+        horizonte: int | None = None,
+        desde: date | None = None,
+        ate: date | None = None,
+    ) -> list[AmostraConfianca]:
+        """Amostras reais para a curva do `confianca_score` (TASK-53).
+
+        Le apenas sinais ja avaliados no diario: `sinal_diario.confianca_score`
+        junto de `sinal_resultado.acerto`. O metodo nao decide recalibracao
+        nem muda recomendacao; ele so entrega a evidencia real para a camada de
+        validacao/UX e para a DEC posterior.
+        """
+        linhas = db.execute(
+            text(
+                "SELECT s.confianca_score, r.acerto "
+                "FROM sinal_diario s "
+                "JOIN sinal_resultado r ON r.sinal_id = s.id "
+                "WHERE s.confianca_score IS NOT NULL "
+                "AND (:versao_regra IS NULL OR s.versao_regra = :versao_regra) "
+                "AND (:horizonte IS NULL OR r.horizonte = :horizonte) "
+                "AND (:desde IS NULL OR s.data_pregao >= :desde) "
+                "AND (:ate IS NULL OR s.data_pregao <= :ate) "
+                "ORDER BY s.data_pregao, s.simbolo, r.horizonte"
+            ),
+            {
+                "versao_regra": versao_regra,
+                "horizonte": horizonte,
+                "desde": desde,
+                "ate": ate,
+            },
+        )
+        return [
+            AmostraConfianca(score, None if acerto is None else bool(acerto))
+            for score, acerto in linhas
+        ]
 
     def series_da_carteira(self, db, desde: date) -> dict[str, list[Pregao]]:
         """Serie de todos os ativos com candle desde `desde`, por simbolo.

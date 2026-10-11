@@ -28,6 +28,38 @@ class FaixaConfianca:
     taxa_acerto: float | None
 
 
+@dataclass(frozen=True)
+class CurvaConfianca:
+    """Leitura consolidada da evidencia real disponivel para o score."""
+
+    faixas: list[FaixaConfianca]
+    total: int
+    direcionais: int
+
+    @property
+    def tem_evidencia_real(self) -> bool:
+        return self.direcionais > 0
+
+
+def curva_real(
+    amostras: Iterable[AmostraConfianca | tuple[float | int | None, bool | None]],
+    tamanho_faixa: int = 20,
+) -> CurvaConfianca:
+    """Calcula a curva e explicita se existe evidencia real direcional.
+
+    A ausencia de evidencia real deve manter qualquer UX em `NAO_CALIBRADA`.
+    O modulo nao transforma score em recomendacao nem escolhe novos limiares;
+    essa decisao continua dependendo de DEC apos execucao real.
+    """
+    materializadas = list(amostras)
+    faixas = curva_por_faixa(materializadas, tamanho_faixa)
+    return CurvaConfianca(
+        faixas=faixas,
+        total=sum(f.total for f in faixas),
+        direcionais=sum(f.direcionais for f in faixas),
+    )
+
+
 def curva_por_faixa(
     amostras: Iterable[AmostraConfianca | tuple[float | int | None, bool | None]],
     tamanho_faixa: int = 20,
