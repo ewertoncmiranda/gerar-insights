@@ -15,6 +15,7 @@ class EntradaSnapshot:
     data_pregao: date
     versao_regra: str
     status_operacional: str | None
+    status_sistema: str | None = None
     faixa_liquidez: str | None = None
     sinal_principal: str | None = None
     sinal_momentum: str | None = None
@@ -26,6 +27,8 @@ class EntradaSnapshot:
     posicao: dict | None = None
     ultimo_evento: dict | None = None
     motivos_bloqueio: list[dict] = field(default_factory=list)
+    ressalvas_elegibilidade: list[dict] = field(default_factory=list)
+    setor_grupo: str | None = None
 
 
 def montar_snapshot(entrada: EntradaSnapshot) -> dict:
@@ -44,8 +47,10 @@ def montar_snapshot(entrada: EntradaSnapshot) -> dict:
         "simbolo": entrada.simbolo,
         "dataPregao": entrada.data_pregao.isoformat(),
         "versaoRegra": entrada.versao_regra,
+        "statusSistema": entrada.status_sistema,
         "statusOperacional": entrada.status_operacional,
         "faixaLiquidez": entrada.faixa_liquidez,
+        "setorGrupo": entrada.setor_grupo,
         "sinalPrincipal": entrada.sinal_principal,
         "sinalTecnico": {
             "momentum": entrada.sinal_momentum,
@@ -58,6 +63,12 @@ def montar_snapshot(entrada: EntradaSnapshot) -> dict:
         "posicao": entrada.posicao,
         "ultimoEvento": entrada.ultimo_evento,
         "motivosBloqueio": entrada.motivos_bloqueio,
+        "elegibilidadeTicker": {
+            "elegivel": entrada.status_operacional in {"EM_OBSERVACAO", "PAPER_TRADING_ELEGIVEL"},
+            "faixaLiquidez": entrada.faixa_liquidez,
+            "bloqueios": entrada.motivos_bloqueio,
+            "ressalvas": entrada.ressalvas_elegibilidade,
+        },
         "consenso": consenso.como_dict(),
     }
     snapshot["tese"] = montar_tese(snapshot, snapshot["consenso"])

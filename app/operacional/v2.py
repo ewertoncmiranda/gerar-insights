@@ -14,11 +14,16 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
+from dataclasses import asdict
 from datetime import date
 
 from sqlalchemy import bindparam, text
 
+from app.operacional.elegibilidade import Elegibilidade
+from app.operacional.repositorio import RepositorioOperacional
 from app.operacional.snapshot import EntradaSnapshot, montar_snapshot
+from app.operacional.servico import avaliar_pregao
 from app.operacional.timeline import montar_timeline
 from app.validacao.confianca import curva_real
 from app.validacao.repositorio_diario import RepositorioDiario as RepositorioValidacao
@@ -61,6 +66,19 @@ class RepositorioOperabilidadeV2:
         ), {"d": data_pregao}).mappings()
         return {r["simbolo"]: dict(r) for r in linhas}
 
+    def setores(self, db) -> dict[str, str]:
+        return dict(db.execute(text(
+            "SELECT t.simbolo, COALESCE(g.grupo_setor, e.setor, 'SEM_SETOR') FROM cvm_ticker t "
+            "LEFT JOIN cvm_empresa e ON e.cnpj = t.cnpj "
+            "LEFT JOIN setor_grupo g ON g.setor_cvm = e.setor"
+        )).all())
+
+    def elegibilidades(self, db, data_pregao: date, versao: str) -> dict[str, Elegibilidade]:
+        """Usa a mesma avaliacao oficial do diario; V2 nao recalcula liquidez/elegibilidade por fora."""
+        _, itens = avaliar_pregao(
+            db, data_pregao=data_pregao, versao=versao, repositorio=RepositorioOperacional())
+        return {item.simbolo: item for item in itens}
+
     def insights(self, db, data_pregao: date) -> dict[str, dict]:
         linhas = db.execute(text(
             "SELECT i.simbolo, i.recomendacao, i.detalhes_json FROM insight_acao i "
@@ -94,7 +112,8 @@ class RepositorioOperabilidadeV2:
         linhas = db.execute(text(
             "SELECT simbolo, status, data_entrada, data_decisao_entrada, data_saida, horizonte_pregoes, "
             "quantidade, motivo_entrada_json, motivo_saida_json FROM operacao_simulada "
-            "WHERE versao_regra = :v AND status IN ('PENDENTE', 'ABERTA')"
+            "WHERE versao_regra = :v AND status IN ('PENDENTE', 'ABERTA', 'FECHADA') "
+            "AND id IN (SELECT MAX(id) FROM operacao_simulada WHERE versao_regra = :v GROUP BY simbolo)"
         ), {"v": versao}).mappings()
         saida = {}
         for r in linhas:
@@ -128,15 +147,20 @@ class RepositorioOperabilidadeV2:
         return RepositorioValidacao().amostras_confianca(db, versao_regra=versao)
 
     def salvar_snapshot(self, db, snapshot: dict) -> None:
+        status_sistema = snapshot.get("statusSistema") or snapshot.get("statusOperacional") or "NAO_OPERAVEL"
         db.execute(text(
             "INSERT INTO ticker_operacional_snapshot "
-            "(simbolo, data_pregao, versao_regra, status_operacional, faixa_liquidez, sinal_principal, "
-            "sinal_tecnico, opiniao_ia, confianca_faixa, posicao_status, ultimo_evento_tipo, "
+            "(simbolo, data_pregao, versao_regra, status_sistema, status_operacional, faixa_liquidez, "
+            "setor_grupo, sinal_principal, sinal_tecnico, opiniao_ia, confianca_faixa, posicao_status, "
+            "ultimo_evento_tipo, "
             "payload_json, consenso_json, tese_json, atualizado_em) "
-            "VALUES (:simbolo, :data_pregao, :versao_regra, :status, :liquidez, :sinal, :tecnico, :opiniao, "
-            ":confianca, :posicao, :evento, :payload, :consenso, :tese, CURRENT_TIMESTAMP) "
-            "ON DUPLICATE KEY UPDATE status_operacional = VALUES(status_operacional), "
-            "faixa_liquidez = VALUES(faixa_liquidez), sinal_principal = VALUES(sinal_principal), "
+            "VALUES (:simbolo, :data_pregao, :versao_regra, :status, :status_operacional, :liquidez, :setor, "
+            ":sinal, :tecnico, :opiniao, :confianca, :posicao, :evento, :payload, :consenso, :tese, "
+            "CURRENT_TIMESTAMP) "
+            "ON DUPLICATE KEY UPDATE status_sistema = VALUES(status_sistema), "
+            "status_operacional = VALUES(status_operacional), "
+            "faixa_liquidez = VALUES(faixa_liquidez), setor_grupo = VALUES(setor_grupo), "
+            "sinal_principal = VALUES(sinal_principal), "
             "sinal_tecnico = VALUES(sinal_tecnico), opiniao_ia = VALUES(opiniao_ia), "
             "confianca_faixa = VALUES(confianca_faixa), posicao_status = VALUES(posicao_status), "
             "ultimo_evento_tipo = VALUES(ultimo_evento_tipo), payload_json = VALUES(payload_json), "
@@ -145,8 +169,10 @@ class RepositorioOperabilidadeV2:
             "simbolo": snapshot["simbolo"],
             "data_pregao": snapshot["dataPregao"],
             "versao_regra": snapshot["versaoRegra"],
-            "status": snapshot["statusOperacional"],
+            "status": status_sistema,
+            "status_operacional": snapshot.get("statusOperacional"),
             "liquidez": snapshot["faixaLiquidez"],
+            "setor": snapshot.get("setorGrupo"),
             "sinal": snapshot["sinalPrincipal"],
             "tecnico": _json(snapshot["sinalTecnico"]),
             "opiniao": snapshot["opiniaoIa"],
@@ -163,20 +189,26 @@ class RepositorioOperabilidadeV2:
             return
         comando = text(
             "INSERT IGNORE INTO ticker_operacional_timeline "
-            "(event_id, simbolo, data_evento, versao_regra, tipo, severidade, titulo, payload_json, criado_em) "
-            "VALUES (:event_id, :simbolo, :data_evento, :versao_regra, :tipo, :severidade, :titulo, :payload, "
-            "CURRENT_TIMESTAMP)"
+            "(event_id, simbolo, data_pregao, data_evento, versao_regra, ocorrido_em, tipo_evento, tipo, "
+            "categoria, severidade, codigo, titulo, payload_json, criado_em) "
+            "VALUES (:event_id, :simbolo, :data_evento, :data_evento, :versao_regra, :data_evento, :tipo, :tipo, "
+            ":categoria, :severidade, :tipo, :titulo, :payload, CURRENT_TIMESTAMP)"
         ).bindparams(bindparam("payload"))
         for item in itens:
+            event_id = item.get("eventId") or str(uuid.uuid5(
+                uuid.NAMESPACE_URL, f"opr-timeline:{simbolo}:{item['data']}:{item['tipo']}"))
+            severidade = "ATENCAO" if item["severidade"] == "ALERTA" else item["severidade"]
+            payload = {**item, "eventId": event_id, "versaoRegra": versao, "severidade": severidade}
             db.execute(comando, {
-                "event_id": item["eventId"] or f"{simbolo}:{item['data']}:{item['tipo']}",
+                "event_id": event_id,
                 "simbolo": simbolo,
                 "data_evento": item["data"],
                 "versao_regra": versao,
                 "tipo": item["tipo"],
-                "severidade": item["severidade"],
+                "categoria": item.get("categoria") or "EVENTO",
+                "severidade": severidade,
                 "titulo": item["titulo"],
-                "payload": _json(item),
+                "payload": _json(payload),
             })
 
 
@@ -191,24 +223,29 @@ class OperabilidadeV2:
 
         status = self.repo.status_do_pregao(db, data_pregao, versao)
         liquidez = self.repo.liquidez(db, data_pregao)
+        setores = self.repo.setores(db)
+        elegibilidades = self.repo.elegibilidades(db, data_pregao, versao)
         insights = self.repo.insights(db, data_pregao)
         opinioes = self.repo.opinioes(db, data_pregao)
         posicoes = self.repo.posicoes(db, versao)
         eventos = self.repo.eventos(db, data_pregao, versao)
         curva = curva_real(self.repo.amostras_confianca(db, versao))
 
-        simbolos = set(liquidez) | set(insights) | set(opinioes) | set(posicoes) | set(eventos)
+        simbolos = set(liquidez) | set(elegibilidades) | set(insights) | set(opinioes) | set(posicoes) | set(eventos)
         total = 0
         for simbolo in sorted(simbolos):
             evs = eventos.get(simbolo, [])
             timeline = montar_timeline(evs)
-            motivos = _motivos_bloqueio(evs, posicoes.get(simbolo))
+            elegibilidade = elegibilidades.get(simbolo)
+            motivos = _motivos_da_elegibilidade(elegibilidade) or _motivos_bloqueio(evs, data_pregao)
             entrada = EntradaSnapshot(
                 simbolo=simbolo,
                 data_pregao=data_pregao,
                 versao_regra=versao,
-                status_operacional=status,
-                faixa_liquidez=_faixa_liquidez(liquidez.get(simbolo)),
+                status_sistema=status,
+                status_operacional=_status_operacional_ticker(status, elegibilidade),
+                setor_grupo=setores.get(simbolo),
+                faixa_liquidez=elegibilidade.faixa if elegibilidade else _faixa_liquidez(liquidez.get(simbolo)),
                 sinal_principal=(insights.get(simbolo) or {}).get("sinal_principal"),
                 sinal_momentum=(insights.get(simbolo) or {}).get("sinal_momentum"),
                 sinal_reversao=(insights.get(simbolo) or {}).get("sinal_reversao"),
@@ -219,6 +256,7 @@ class OperabilidadeV2:
                 posicao=posicoes.get(simbolo),
                 ultimo_evento=timeline[-1] if timeline else None,
                 motivos_bloqueio=motivos,
+                ressalvas_elegibilidade=_ressalvas_da_elegibilidade(elegibilidade),
             )
             snapshot = montar_snapshot(entrada)
             self.repo.salvar_snapshot(db, snapshot)
@@ -242,14 +280,45 @@ def _faixa_liquidez(metricas: dict | None) -> str | None:
     return "INSUFICIENTE"
 
 
-def _motivos_bloqueio(eventos: list[dict], posicao: dict | None) -> list[dict]:
+def _status_operacional_ticker(status_sistema: str | None, elegibilidade: Elegibilidade | None) -> str:
+    """Status do ticker, separado do status oficial do sistema no diario.
+
+    O enum segue o contrato existente: bloqueios do ticker viram BLOQUEADO; quando o ticker esta apto,
+    o status acompanha a trava global do diario (EM_OBSERVACAO ou PAPER_TRADING_ELEGIVEL).
+    """
+    if status_sistema in {"NAO_OPERAVEL", "BLOQUEADO"}:
+        return status_sistema
+    if elegibilidade is None:
+        return "NAO_OPERAVEL"
+    if not elegibilidade.elegivel:
+        return "BLOQUEADO"
+    if status_sistema in {"EM_OBSERVACAO", "PAPER_TRADING_ELEGIVEL"}:
+        return status_sistema
+    return "NAO_OPERAVEL"
+
+
+def _motivos_da_elegibilidade(elegibilidade: Elegibilidade | None) -> list[dict]:
+    if elegibilidade is None:
+        return []
+    return [asdict(motivo) for motivo in elegibilidade.bloqueios]
+
+
+def _ressalvas_da_elegibilidade(elegibilidade: Elegibilidade | None) -> list[dict]:
+    if elegibilidade is None:
+        return []
+    return [asdict(motivo) for motivo in elegibilidade.ressalvas]
+
+
+def _motivos_bloqueio(eventos: list[dict], data_pregao: date) -> list[dict]:
     motivos = []
     for evento in eventos:
         if evento.get("tipo") not in {"BLOQUEIO_LIQUIDEZ", "BLOQUEIO_DADO"}:
             continue
+        data_evento = evento.get("data_pregao") or evento.get("data")
+        if isinstance(data_evento, date):
+            data_evento = data_evento.isoformat()
+        if str(data_evento or "")[:10] != data_pregao.isoformat():
+            continue
         payload = evento.get("payload") or {}
         motivos.extend(payload.get("motivos") or [])
-    motivo_entrada = (posicao or {}).get("motivoEntrada") or {}
-    elegibilidade = motivo_entrada.get("elegibilidade") or {}
-    motivos.extend(elegibilidade.get("bloqueios") or [])
     return motivos

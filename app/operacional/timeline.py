@@ -7,10 +7,20 @@ from datetime import date, datetime
 SEVERIDADE_PADRAO = {
     "POSICAO_ABERTA": "INFO",
     "POSICAO_FECHADA": "INFO",
-    "BLOQUEIO_LIQUIDEZ": "ALERTA",
-    "BLOQUEIO_DADO": "ALERTA",
+    "BLOQUEIO_LIQUIDEZ": "ATENCAO",
+    "BLOQUEIO_DADO": "ATENCAO",
     "DIARIO_AVALIADO": "INFO",
     "ALERTA_RISCO": "CRITICO",
+}
+
+CATEGORIA_PADRAO = {
+    "SINAL_GERADO": "SINAL",
+    "POSICAO_ABERTA": "RISCO",
+    "POSICAO_FECHADA": "RISCO",
+    "BLOQUEIO_DADO": "DADO",
+    "BLOQUEIO_LIQUIDEZ": "LIQUIDEZ",
+    "ALERTA_RISCO": "RISCO",
+    "DIARIO_AVALIADO": "SISTEMA",
 }
 
 
@@ -37,6 +47,7 @@ def montar_timeline(eventos: list[dict]) -> list[dict]:
             "data": _iso(evento.get("data_pregao") or evento.get("data")),
             "tipo": tipo,
             "severidade": evento.get("severidade") or SEVERIDADE_PADRAO.get(tipo, "INFO"),
+            "categoria": CATEGORIA_PADRAO.get(tipo, "EVENTO"),
             "titulo": _titulo(tipo, payload),
             "payload": payload,
         })
@@ -64,4 +75,4 @@ def _iso(valor) -> str | None:
 
 
 def _ordem(severidade: str) -> int:
-    return {"CRITICO": 0, "ALERTA": 1, "INFO": 2}.get(severidade, 3)
+    return {"CRITICO": 0, "ATENCAO": 1, "INFO": 2}.get(severidade, 3)
