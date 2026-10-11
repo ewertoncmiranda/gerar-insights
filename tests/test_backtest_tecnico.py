@@ -4,9 +4,11 @@ from decimal import Decimal
 from app.validacao.avaliador import ResultadoHorizonte
 from app.validacao.backtest import (
     Amostra,
+    REGRAS,
     VERSAO_MOMENTUM,
     VERSAO_REVERSAO,
     Vela,
+    agregar,
     aplicar,
     regra_momentum,
     regra_reversao,
@@ -90,3 +92,81 @@ def test_regra_tecnica_sem_sinal_nao_gera_linha_no_placar():
     amostra = _amostra(sinal_momentum=None, sinal_reversao=None)
 
     assert aplicar(amostras=[amostra], regras={VERSAO_MOMENTUM: regra_momentum, VERSAO_REVERSAO: regra_reversao}) == []
+
+
+# ---------------------------------------------------------------------------
+# REGRAS dict contem as versoes tecnicas (TASK-52 / infra#TASK-32)
+# ---------------------------------------------------------------------------
+
+def test_versoes_tecnicas_registradas_em_regras():
+    """Os sinais tecnicos entram no placar do backtest com versao propria."""
+    assert VERSAO_MOMENTUM in REGRAS
+    assert VERSAO_REVERSAO in REGRAS
+
+
+def test_versoes_tecnicas_sao_funcoes_distintas_das_de_valuation():
+    from app.validacao.backtest import VERSAO_REGRA, regra_v1_atual
+    assert REGRAS[VERSAO_MOMENTUM] is not REGRAS.get(VERSAO_REGRA)
+    assert REGRAS[VERSAO_MOMENTUM] is not REGRAS[VERSAO_REVERSAO]
+
+
+# ---------------------------------------------------------------------------
+# sinais_tecnicos_da_janela — limites de janela
+# ---------------------------------------------------------------------------
+
+def test_sinais_nulos_com_janela_abaixo_do_minimo():
+    janela = [_vela(i, 10.0) for i in range(19)]  # < 20 (janela_minima padrao)
+    sinais = sinais_tecnicos_da_janela(janela)
+    assert sinais["sinal_momentum"] is None
+    assert sinais["sinal_reversao"] is None
+
+
+def test_sinais_com_janela_exatamente_no_minimo():
+    janela = [_vela(i, 10.0 + i * 0.1, volume=1000) for i in range(20)]
+    sinais = sinais_tecnicos_da_janela(janela, janela_minima=20)
+    # Nao precisa ter direcao especifica; mas nao pode ser None com 20 velas
+    assert sinais["sinal_momentum"] is not None
+    assert sinais["sinal_reversao"] is not None
+
+
+def test_sinais_valores_validos():
+    janela = [_vela(i, 10.0 + i * 0.1) for i in range(30)]
+    sinais = sinais_tecnicos_da_janela(janela)
+    assert sinais["sinal_momentum"] in {"COMPRA_TECNICA", "VENDA_TECNICA", "NEUTRO_TECNICO"}
+    assert sinais["sinal_reversao"] in {"COMPRA_TECNICA", "VENDA_TECNICA", "NEUTRO_TECNICO"}
+
+
+# ---------------------------------------------------------------------------
+# Regras tecnicas nao alteram a recomendacao principal (DEC-11)
+# ---------------------------------------------------------------------------
+
+def test_sinal_tecnico_nao_sobrescreve_recomendacao_de_valuation():
+    """VERSAO_MOMENTUM/REVERSAO sao regras independentes; cada uma produz
+    sua propria linha no placar sem fundir com as outras."""
+    amostra = _amostra(sinal_momentum="COMPRA_TECNICA", sinal_reversao="VENDA_TECNICA")
+
+    avaliacoes = aplicar(
+        amostras=[amostra],
+        regras={VERSAO_MOMENTUM: regra_momentum, VERSAO_REVERSAO: regra_reversao},
+    )
+
+    versoes = {a.versao for a in avaliacoes}
+    assert versoes == {VERSAO_MOMENTUM, VERSAO_REVERSAO}
+    # Recomendacoes ficam separadas — a de momentum nao contamina a de reversao
+    rec_por_versao = {a.versao: a.recomendacao for a in avaliacoes}
+    assert rec_por_versao[VERSAO_MOMENTUM] == "COMPRA_TECNICA"
+    assert rec_por_versao[VERSAO_REVERSAO] == "VENDA_TECNICA"
+
+
+def test_placar_tecnico_separado_do_valuation():
+    from app.validacao.backtest import VERSAO_REGRA
+    amostra_m = _amostra(sinal_momentum="COMPRA_TECNICA", sinal_reversao="VENDA_TECNICA")
+
+    avaliacoes = aplicar(
+        amostras=[amostra_m],
+        regras={VERSAO_MOMENTUM: regra_momentum, VERSAO_REVERSAO: regra_reversao},
+    )
+    placar = agregar(avaliacoes)
+
+    versoes_placar = {l["versao"] for l in placar}
+    assert VERSAO_REGRA not in versoes_placar  # valuation nao contamina o placar tecnico
