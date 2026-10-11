@@ -11,9 +11,12 @@ Em cada pregao P (so dados com data <= P; execucao sempre na ABERTURA, nunca no 
 4. posicoes abertas sao avaliadas no fechamento de P (stop movel, motivo de saida para P+1);
 5. novas entradas: ativo elegivel (OPR-INS-1) com opiniao SINAL_POSITIVO recente, ordenado por
    liquidez; tamanho pelo `risco.py` (OPR-INS-2); fica PENDENTE para a abertura de P+1;
-6. patrimonio no fechamento, retorno bruto/liquido, CDI bruto e liquido de IR, excesso e drawdown.
-Imposto estimado (OPR-INS-5) e status pela trava (OPR-INS-6) ainda nao entram: imposto NULL e
-status EM_OBSERVACAO.
+2b. IR estimado (OPR-INS-5, `ir.py`), logo depois das saidas: apuracao mensal das operacoes fechadas; o DARF do mes anterior
+   sai do caixa no primeiro pregao do mes; o imposto do mes corrente fica provisionado (descontado
+   do patrimonio) e rateado nas operacoes com lucro (`imposto_estimado`, `resultado_pos_imposto_estimado`);
+7. patrimonio no fechamento (liquido da provisao de IR), retorno bruto/liquido, CDI bruto e liquido
+   de IR, excesso e drawdown.
+Status calculado pela trava de operabilidade (OPR-INS-6, `status.py`).
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import ROUND_FLOOR, Decimal
 
-from app.operacional import risco, saida
+from app.operacional import ir, risco, saida, status as _status_mod
 from app.operacional.custos import custo_por_lado
 from app.operacional.elegibilidade import ALTA, INSUFICIENTE, LimitesLiquidez, faixa_de_liquidez
 from app.operacional.repositorio import RepositorioOperacional
@@ -38,7 +41,6 @@ POSITIVO = "SINAL_POSITIVO"
 ESPERA_ENTRADA = 5  # pregoes que uma entrada PENDENTE espera o ativo negociar antes de ser cancelada
 LOTE = 100
 HORIZONTES = (21, 63, 126)
-STATUS_COLETA = "EM_OBSERVACAO"  # OPR-INS-6 decide o status de verdade
 D0 = Decimal(0)
 
 
@@ -84,6 +86,7 @@ class DiarioOperacional:
         self.repo = repo or RepositorioDiario()
         self.repo_op = repo_operacional or RepositorioOperacional()
         self.versao = versao or versao_regra()
+        self.regras_ir = ir.carregar_regras()
 
     # ---------------------------------------------------------------------------------------------
     def executar(self, sessao_factory) -> ResumoDiario:
@@ -155,6 +158,11 @@ class DiarioOperacional:
                 "simbolo": op["simbolo"], "motivo_saida": op["motivo_saida"], "preco_saida": str(abertura),
                 "resultado_pos_custos": str(_q(pos_custos))}, op["simbolo"], op["id"])
 
+        # 2b. IR estimado (OPR-INS-5), depois das saidas e antes das entradas: o DARF do mes anterior
+        # sai do caixa no primeiro pregao do mes; o imposto do mes corrente fica provisionado
+        provisao, imposto_dia = self._imposto(db, p, mercado, indice_p, anterior is not None)
+        caixa -= imposto_dia
+
         # 3. entradas pendentes: abertura de P
         for op in [o for o in ops if o["status"] == "PENDENTE"]:
             abertura = _d((cot.get(op["simbolo"]) or {}).get("abertura"))
@@ -168,8 +176,9 @@ class DiarioOperacional:
             metr = por_simbolo[op["simbolo"]].metricas if op["simbolo"] in por_simbolo else {}
             spread, estimado = _d(metr.get("spread_mediano_63d")), _d(metr.get("spread_estimado_63d"))
             quantidade = int(op["quantidade"])
-            while quantidade > 0 and abertura * quantidade + custo_por_lado(abertura * quantidade, spread, parametros, estimado) > caixa:
-                quantidade = quantidade - LOTE if quantidade > LOTE else int((caixa / abertura * Decimal("0.99")).to_integral_value(ROUND_FLOOR))
+            livre = caixa - provisao["hoje"]  # o IR provisionado do mes nao pode ser gasto
+            while quantidade > 0 and abertura * quantidade + custo_por_lado(abertura * quantidade, spread, parametros, estimado) > livre:
+                quantidade = quantidade - LOTE if quantidade > LOTE else int((max(livre, D0) / abertura * Decimal("0.99")).to_integral_value(ROUND_FLOOR))
                 if quantidade * abertura < p_sizing.posicao_minima:
                     quantidade = 0
             if quantidade <= 0:
@@ -224,12 +233,12 @@ class DiarioOperacional:
             repo.atualizar(db, op["id"], campos)
             op.update(campos)
 
-        # 6a. marcacao a mercado (antes das novas entradas, que so executam em P+1)
+        # 7a. marcacao a mercado (antes das novas entradas, que so executam em P+1)
         em_carteira = [o for o in ops if o["status"] == "ABERTA"]
         fechamentos = repo.ultimo_fechamento(db, p, {o["simbolo"] for o in em_carteira})
         posicoes_valor = sum((_d(fechamentos.get(o["simbolo"]) or o["preco_entrada"]) * o["quantidade"]
                               for o in em_carteira), D0)
-        patrimonio = _q(caixa + posicoes_valor)
+        patrimonio = _q(caixa + posicoes_valor - provisao["hoje"])
 
         # 5. novas entradas (PENDENTE para a abertura de P+1)
         pendentes = [o for o in ops if o["status"] == "PENDENTE"]
@@ -260,7 +269,7 @@ class DiarioOperacional:
             if fechamento is None:
                 continue
             setor = setores.get(e.simbolo, "SEM_SETOR")
-            r = risco.calcular(capital=patrimonio, caixa=caixa - reservado, preco=fechamento,
+            r = risco.calcular(capital=patrimonio, caixa=caixa - reservado - provisao["hoje"], preco=fechamento,
                                atr14=_d(e.metricas.get("atr14")), faixa=e.faixa,
                                percentil_volatilidade=_d(e.metricas.get("percentil_volatilidade")),
                                vol21d=_d(e.metricas.get("volume_financeiro_medio_21d")),
@@ -284,13 +293,15 @@ class DiarioOperacional:
                 reservado += r.valor_financeiro
                 exposicao_setor[setor] = exposicao_setor.get(setor, D0) + r.valor_financeiro
 
-        # 6b. diario do pregao
+        # 7b. diario do pregao
         anterior_patrimonio = _d(anterior["patrimonio"]) if anterior else capital
         cdi_acum = ((1 + _d(anterior["cdi_acumulado"] or 0)) * (1 + cdi_dia) - 1) if anterior else cdi_dia
         dias = (p - inicio).days
         cdi_liq = cdi_acum * (1 - aliquota_ir_renda_fixa(dias))
         ret_liq_dia = patrimonio / anterior_patrimonio - 1
-        ret_bruto_dia = (patrimonio + custos_dia) / anterior_patrimonio - 1
+        # bruto = sem custos e sem IR: devolve o custo do dia, o DARF pago e a variacao da provisao
+        efeito_ir = imposto_dia + provisao["hoje"] - provisao["ontem"]
+        ret_bruto_dia = (patrimonio + custos_dia + efeito_ir) / anterior_patrimonio - 1
         ret_acum = patrimonio / capital - 1
         pico = max(_d(anterior["pico"]) if anterior else capital, patrimonio)
         drawdown = patrimonio / pico - 1
@@ -306,26 +317,82 @@ class DiarioOperacional:
             "cdi_acumulado": _q(cdi_acum, q8), "cdi_liquido_ir_acumulado": _q(cdi_liq, q8),
             "excesso_sobre_cdi_liquido": _q(ret_acum - cdi_liq, q8),
             "drawdown": _q(drawdown, q8), "drawdown_maximo": _q(dd_max, q8),
-            "imposto_estimado_mes": None, "violacoes_liquidez": 0,
-            "status_sistema": STATUS_COLETA,
-            "motivos_status_json": {"motivo": "coleta em andamento; trava de operabilidade na OPR-INS-6",
-                                    "pregoes_no_diario": bisect_right(mercado, p) - bisect_left(mercado, inicio)},
+            "imposto_estimado_mes": _q(provisao["hoje"]), "violacoes_liquidez": 0,
         }
+        pregoes_no_diario = bisect_right(mercado, p) - bisect_left(mercado, inicio)
+        total_fechadas = len(repo.operacoes_fechadas(db, versao, p))
+        st = _status_mod.calcular(
+            pregoes_no_diario=pregoes_no_diario,
+            retorno_liquido_acumulado=ret_acum,
+            cdi_liquido_ir_acumulado=cdi_liq,
+            drawdown_maximo=dd_max,
+            violacoes_liquidez_total=0,
+            operacoes_encerradas=total_fechadas,
+            parametros=_status_mod.ParametrosTrava.de_parametros(parametros),
+        )
+        linha.update({
+            "status_sistema": st.status,
+            "motivos_status_json": {
+                "motivos": [{"codigo": c, "descricao": c} for c in st.criterios_nao_atendidos],
+                "pregoes_no_diario": st.pregoes_avaliados,
+            },
+        })
         repo.gravar_diario(db, versao, linha)
         repo.evento(db, versao, "DIARIO_AVALIADO", p, {k: str(v) for k, v in linha.items() if k != "motivos_status_json"})
         log.info("Diario %s | patrimonio=%s | caixa=%s | abertas=%d | novas pendentes=%d", p, patrimonio, _q(caixa),
                  len(em_carteira), resumo.pendentes)
 
 
+    # ---------------------------------------------------------------------------------------------
+    def _imposto(self, db, p: date, mercado: list[date], indice_p: int, tem_anterior: bool
+                 ) -> tuple[dict[str, Decimal], Decimal]:
+        """({"hoje", "ontem"} provisao de IR, DARF debitado hoje) e grava o rateio nas operacoes do mes.
+
+        Recalcula a apuracao inteira a partir das operacoes fechadas (deterministico: rodar de novo o
+        mesmo pregao da o mesmo resultado).
+        """
+        fechadas = [ir.OperacaoFechada(o["id"], o["simbolo"], o["data_entrada"], o["data_saida"],
+                                       _d(o["preco_saida"]) * int(o["quantidade"]), _d(o["resultado_pos_custos"]) or D0)
+                    for o in self.repo.operacoes_fechadas(db, self.versao, p)]
+        apuracoes = ir.apurar(fechadas, self.regras_ir)
+        provisao_hoje, darf_anterior = ir.provisao_em(apuracoes, p)
+        ontem = mercado[indice_p - 1] if indice_p > 0 else None
+        provisao_ontem = D0
+        if tem_anterior and ontem is not None:
+            provisao_ontem, _ = ir.provisao_em(ir.apurar([o for o in fechadas if o.data_saida <= ontem],
+                                                         self.regras_ir), ontem)
+        primeiro_do_mes = ontem is None or (ontem.year, ontem.month) != (p.year, p.month)
+        imposto_dia = darf_anterior if (tem_anterior and primeiro_do_mes) else D0
+
+        mes = f"{p.year:04d}-{p.month:02d}"
+        atual = next((a for a in apuracoes if a.mes == mes), None)
+        if atual is not None:
+            por_id = {o.id: o for o in fechadas}
+            for op_id, imposto in atual.rateio.items():
+                pos_custos = por_id[op_id].resultado_pos_custos
+                self.repo.atualizar(db, op_id, {"imposto_estimado": _q(imposto),
+                                                "resultado_pos_imposto_estimado": _q(pos_custos - imposto)})
+            for v in atual.violacoes:
+                log.warning("IR %s | violacao %s | %s", mes, v["codigo"], v)
+        if imposto_dia:
+            log.info("IR | DARF de %s debitado em %s: %s", ontem and f"{ontem.year:04d}-{ontem.month:02d}", p, imposto_dia)
+        return {"hoje": provisao_hoje, "ontem": provisao_ontem}, imposto_dia
+
+
 def main() -> int:
     """Etapa da rotina da manha (`cargas-etl.ps1`): sem argumentos, processa os pregoes novos."""
     from app.config.config_logger import setup_logger  # noqa: PLC0415
     from app.config.database_config import ConfigDatabase  # noqa: PLC0415
+    from app.operacional.eventos import publicar_pendentes  # noqa: PLC0415
 
     logger = setup_logger()
-    resumo = DiarioOperacional().executar(ConfigDatabase().session)
+    db_config = ConfigDatabase()
+    resumo = DiarioOperacional().executar(db_config.session)
     logger.info("Diario operacional | pregoes=%d | abertas=%d | fechadas=%d | pendentes=%d | canceladas=%d",
                 len(resumo.pregoes), resumo.abertas, resumo.fechadas, resumo.pendentes, resumo.canceladas)
+    with db_config.session() as db:
+        publicacao = publicar_pendentes(db)
+    logger.info("Eventos operacionais | %s", publicacao)
     return 0
 
 
