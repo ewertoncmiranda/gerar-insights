@@ -465,6 +465,18 @@ def aplicar(amostras: list[Amostra], regras: dict[str, Callable[[Amostra], str]]
     return avaliacoes
 
 
+def sem_sinal_por_motivo(amostras: list[Amostra], avaliacoes: list[Avaliacao]) -> tuple[list[str], list[str]]:
+    """(sem nenhum balanco, com balanco mas sem sinal) entre os ativos que nunca receberam sinal.
+
+    TASK-45: so o primeiro grupo e problema de dado (codigo antigo sem ligacao com o CNPJ); o segundo
+    tem balanco e a regra simplesmente nao da sinal (lucro medio nao positivo, poucos exercicios).
+    """
+    com_sinal = {a.simbolo for a in avaliacoes}
+    nunca = sorted({a.simbolo for a in amostras} - com_sinal)
+    com_balanco = {a.simbolo for a in amostras if a.lpa_recente is not None}
+    return [s for s in nunca if s not in com_balanco], [s for s in nunca if s in com_balanco]
+
+
 class Backtest:
     def __init__(self, fabrica_de_sessao, logger: Logger, corte: date = CORTE_PADRAO,
                  inicio: date = INICIO_PADRAO, horizontes=HORIZONTES_PREGOES):
@@ -500,10 +512,12 @@ class Backtest:
         amostras, observacoes, ativos = montar_amostras(db, self._inicio, self._corte, self._horizontes)
         avaliacoes = aplicar(amostras, REGRAS)
 
-        com_sinal = {a.simbolo for a in avaliacoes}
-        nunca = sorted({a.simbolo for a in amostras} - com_sinal)
-        if nunca:
-            observacoes.append(f"Sem nenhum balanço entregue no período (fora do placar): {', '.join(nunca)}")
+        sem_balanco, sem_sinal = sem_sinal_por_motivo(amostras, avaliacoes)
+        if sem_balanco:
+            observacoes.append(f"Sem nenhum balanço entregue no período (fora do placar): {', '.join(sem_balanco)}")
+        if sem_sinal:
+            observacoes.append("Com balanço, mas nenhum sinal no período (lucro médio não positivo ou poucos "
+                               f"exercícios): {', '.join(sem_sinal)}")
         sem_dado = sum(1 for a in amostras if regra_v1_atual(a) == "SEM_DADOS")
         if sem_dado:
             observacoes.append(
@@ -700,7 +714,13 @@ def main(argv: list[str] | None = None) -> int:
     inicio = datetime.now()
     execucao = Backtest(ConfigDatabase().session, logger, argumentos.corte, argumentos.inicio).executar()
     logger.info("Backtest %s gravado em %.1fs", execucao, (datetime.now() - inicio).total_seconds())
-    return 0
+    # LAC-INS-8/9: o metodo por ranking em janelas sucessivas roda na mesma etapa semanal (DEC-AGT-1),
+    # todas as versoes com a hipotese pre-registrada. Falha aqui nao apaga o backtest por classes.
+    from app.validacao.backtest_ranking import BacktestRanking  # noqa: PLC0415 - backtest_ranking importa este modulo
+    inicio = datetime.now()
+    execucoes = BacktestRanking(ConfigDatabase().session, logger).executar_todas()
+    logger.info("Backtest por ranking %s gravado em %.1fs", execucoes, (datetime.now() - inicio).total_seconds())
+    return 0 if all(execucoes.values()) else 1
 
 
 if __name__ == "__main__":

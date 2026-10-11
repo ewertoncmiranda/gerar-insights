@@ -1,12 +1,13 @@
 """Backtest pelo metodo de ranking em janelas sucessivas (LAC-INS-8 e 9).
 
-    python -m app.validacao.backtest_ranking --versao VALOR \
-        --hipotese "acoes baratas por lucro e patrimonio rendem mais em 63 pregoes" [--inicio 2011-01-01]
+Sem comando proprio (DEC-AGT-1): roda no fim da etapa semanal de backtest da rotina da manha
+(`app.validacao.backtest`, as sextas), para todas as versoes, com as amostras montadas uma vez.
 
-A hipotese e obrigatoria e fica gravada ANTES de rodar; o numero da
-tentativa conta as execucoes anteriores da mesma versao (familia). O
-resultado de cada mes vai para backtest_ranking_mes/quintil e a decisao de
-promocao (LAC-INS-9), para observacoes e parametros_json da execucao.
+Cada versao tem a sua hipotese PRE-REGISTRADA em `HIPOTESES` (escrita antes de qualquer resultado) e
+gravada na execucao antes de rodar. `numero_tentativa` conta hipoteses DISTINTAS da mesma familia:
+reexecutar a mesma hipotese com mais dados nao e tentativa nova (nao infla o N da correcao); mudar o
+texto da hipotese (ou o score) e. O resultado de cada mes vai para backtest_ranking_mes/quintil e a
+decisao de promocao (LAC-INS-9), para observacoes e parametros_json da execucao.
 
 Versoes (score: maior = mais atraente):
   VALOR               media dos percentis de EARNINGS_YIELD e BOOK_TO_MARKET
@@ -20,12 +21,10 @@ Versoes (score: maior = mais atraente):
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date
 from logging import Logger
 
 from sqlalchemy import text
@@ -59,6 +58,21 @@ COMPONENTES = {
 }
 FATOR_POR_REGRA_SETOR = {"PL_SETOR": "EARNINGS_YIELD", "PVP_SETOR": "BOOK_TO_MARKET", "DIVIDENDOS": "DIVIDEND_YIELD"}
 VERSOES = (*COMPONENTES, "GRAHAM_V1", "VALUATION_SETOR")
+
+# Pre-registro (LAC-INS-8): o que se espera e por que, escrito em 2026-10-11 ANTES de rodar o ranking
+# com os dados do backfill. Mudar um texto conta como tentativa nova da familia.
+HIPOTESES = {
+    "VALOR": "Acoes com maior earnings yield e book-to-market (mais baratas por lucro e por patrimonio) rendem "
+             "mais nos 63 pregoes seguintes que as mais caras, pelo premio de valor documentado na bolsa brasileira.",
+    "VALOR_QUALIDADE": "Entre as acoes baratas, as de melhor qualidade (Piotroski e ROIC altos) rendem mais em 63 "
+                       "pregoes, porque a qualidade separa o valor real da armadilha de valor.",
+    "VALOR_MOMENTO": "Somar o momento de 12-1 meses ao valor melhora o ranking de 63 pregoes, porque valor e "
+                     "momento tem correlacao negativa e se complementam.",
+    "GRAHAM_V1": "A margem de seguranca de Graham da regra oficial ordena as acoes pelo retorno dos 63 pregoes "
+                 "seguintes: maior margem, maior retorno.",
+    "VALUATION_SETOR": "Julgar cada acao pela metrica de valuation do seu grupo de setor (P/L, P/VP, dividendos ou "
+                       "Graham) ordena melhor o retorno de 63 pregoes que um criterio unico para todos.",
+}
 
 Scores = dict[date, dict[str, float]]
 
@@ -145,23 +159,56 @@ def nome_da_janela(janelas: list[Janela], dia: date) -> str:
     return next((j.nome for j in janelas if j.contem_teste(dia)), "TREINO")
 
 
+def numero_da_tentativa(hipoteses_anteriores: list[str], hipotese: str) -> int:
+    """Posicao (1..N) da hipotese entre as DISTINTAS ja registradas na familia, em ordem de registro.
+
+    A mesma hipotese reexecutada mantem o numero; hipotese nova vira a seguinte.
+    """
+    distintas: list[str] = []
+    for h in hipoteses_anteriores:
+        h = (h or "").strip()
+        if h and h not in distintas:
+            distintas.append(h)
+    alvo = hipotese.strip()
+    return distintas.index(alvo) + 1 if alvo in distintas else len(distintas) + 1
+
+
 class BacktestRanking:
     def __init__(self, fabrica_de_sessao, logger: Logger, repositorio: RepositorioFatores | None = None):
         self._sessao = fabrica_de_sessao
         self._logger = logger
         self._repo = repositorio or RepositorioFatores()
 
-    def executar(self, versao: str, hipotese: str, inicio: date = INICIO_PADRAO) -> int:
+    def executar_todas(self, inicio: date = INICIO_PADRAO, versoes=VERSOES) -> dict[str, int | None]:
+        """Todas as versoes com a hipotese pre-registrada, montando as amostras (parte cara) uma vez.
+
+        A falha de uma versao (ex.: fatores ainda nao calculados) fica registrada nela e nao derruba as
+        outras. Devolve {versao: id da execucao, ou None se falhou}.
+        """
+        with self._sessao() as db:
+            amostras, observacoes, ativos = montar_amostras(db, inicio, date.max)
+        saida: dict[str, int | None] = {}
+        for versao in versoes:
+            try:
+                saida[versao] = self.executar(versao, HIPOTESES[versao], inicio,
+                                              preparadas=(amostras, list(observacoes), ativos))
+            except Exception as erro:  # noqa: BLE001 - uma versao nao derruba as outras
+                self._logger.error("Backtest por ranking %s falhou: %s", versao, erro)
+                saida[versao] = None
+        return saida
+
+    def executar(self, versao: str, hipotese: str, inicio: date = INICIO_PADRAO, preparadas=None) -> int:
         if versao not in VERSOES:
             raise ValueError(f"versao desconhecida: {versao} (conhecidas: {', '.join(VERSOES)})")
         if not hipotese or len(hipotese.strip()) < 15:
             raise ValueError("a hipotese e obrigatoria e precisa dizer o que se espera e por que")
         with self._sessao() as db:
             self._repo.exigir(db, "backtest_ranking_mes", "backtest_ranking_quintil", "fator_valor")
-            tentativa = 1 + (db.execute(text(
-                "SELECT COUNT(*) FROM backtest_execucao WHERE metodo = 'RANKING' "
-                "AND JSON_UNQUOTE(JSON_EXTRACT(parametros_json, '$.familia')) = :v"
-            ), {"v": versao}).scalar() or 0)
+            anteriores = [h for (h,) in db.execute(text(
+                "SELECT hipotese FROM backtest_execucao WHERE metodo = 'RANKING' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(parametros_json, '$.familia')) = :v ORDER BY id"
+            ), {"v": versao})]
+            tentativa = numero_da_tentativa(anteriores, hipotese)
             execucao_id = db.execute(text(
                 "INSERT INTO backtest_execucao (status, corte_calibracao, metodo, esquema_validacao, hipotese, "
                 "numero_tentativa, parametros_json) VALUES ('EM_ANDAMENTO', :c, 'RANKING', 'JANELAS_SUCESSIVAS', "
@@ -170,7 +217,7 @@ class BacktestRanking:
                 "p": json.dumps({"familia": versao}, ensure_ascii=False)}).lastrowid
             db.commit()  # a hipotese fica registrada antes de qualquer numero existir
             try:
-                resumo = self._rodar(db, execucao_id, versao, inicio, tentativa)
+                resumo = self._rodar(db, execucao_id, versao, inicio, tentativa, preparadas)
             except Exception as erro:
                 db.rollback()
                 db.execute(text("UPDATE backtest_execucao SET status='ERRO', finalizado_em=NOW(), observacoes=:o "
@@ -208,12 +255,12 @@ class BacktestRanking:
             saida[(simbolo, dia)][codigo] = float(pct)
         return dict(saida)
 
-    def _rodar(self, db, execucao_id: int, versao: str, inicio: date, tentativa: int) -> str:
-        amostras, observacoes, ativos = montar_amostras(db, inicio, date.max)
+    def _rodar(self, db, execucao_id: int, versao: str, inicio: date, tentativa: int, preparadas=None) -> str:
+        amostras, observacoes, ativos = preparadas or montar_amostras(db, inicio, date.max)
         scores = self._scores(db, versao, amostras, inicio)
         meses = medir(amostras, scores)
         if not meses:
-            raise RuntimeError(f"Nenhum mes com score para {versao}: calcule os fatores (python -m app.fatores calcular)")
+            raise RuntimeError(f"Nenhum mes com score para {versao}: fatores ainda nao calculados pela etapa mensal")
         anos = sorted({m.data_referencia.year for m in meses})
         janelas = janelas_sucessivas(max(anos[0], INICIO_PADRAO.year), anos[0] + 1, anos[-1])
 
@@ -259,26 +306,6 @@ class BacktestRanking:
         return f"meses={len(meses)} janelas={len(janelas)} promover={decisao.promover}"
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Backtest por ranking em janelas sucessivas (Plano LAC)")
-    parser.add_argument("--versao", required=True, choices=VERSOES)
-    parser.add_argument("--hipotese", required=True, help="o que se espera e por que, escrito ANTES de rodar")
-    parser.add_argument("--inicio", type=date.fromisoformat, default=INICIO_PADRAO)
-    argumentos = parser.parse_args(argv)
-
-    from app.config.config_logger import setup_logger
-    from app.config.database_config import ConfigDatabase
-
-    logger = setup_logger()
-    inicio = datetime.now()
-    execucao = BacktestRanking(ConfigDatabase().session, logger).executar(argumentos.versao, argumentos.hipotese,
-                                                                           argumentos.inicio)
-    logger.info("Execucao %s gravada em %.1fs", execucao, (datetime.now() - inicio).total_seconds())
-    return 0
-
-
 # Tipo exportado para quem monta scores em testes.
 MontadorDeScores = Callable[[list[Amostra]], Scores]
 
-if __name__ == "__main__":
-    sys.exit(main())

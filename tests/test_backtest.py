@@ -24,6 +24,7 @@ from app.validacao.backtest import (
     primeiros_pregoes_do_mes,
     regra_v1_atual,
     regra_v1_antiga,
+    sem_sinal_por_motivo,
 )
 
 # ---------------------------------------------------------------------------
@@ -295,3 +296,18 @@ def test_aplicar_determinismo():
     r2 = aplicar(amostras, {VERSAO_REGRA: regra_v1_atual})
     assert [(a.simbolo, a.versao, a.resultado.horizonte) for a in r1] == \
            [(a.simbolo, a.versao, a.resultado.horizonte) for a in r2]
+
+
+
+def test_sem_sinal_separa_quem_nao_tem_balanco_de_quem_tem_e_nao_recebe_sinal():
+    """TASK-45: so 'sem balanco' e problema de dado; com balanco e sem sinal e a regra."""
+    amostras = [
+        _amostra("COMSINAL3"),
+        _amostra("SEMBAL3", lpa_anual=None, lpa_recente=None, lpas_anuais=[], fonte_lpa_recente="SEM_BALANCO"),
+        _amostra("PREJUIZO3", lpa_anual=-1.0, lpa_recente=-0.5, lpas_anuais=[-0.5, -1.0]),
+        _amostra("PREJUIZO3", dia=date(2022, 3, 1), lpa_recente=None, fonte_lpa_recente="SEM_BALANCO"),
+    ]
+    avaliacoes = [a for a in aplicar(amostras, {"v": lambda a: "SEM_DADOS" if a.simbolo != "COMSINAL3" else "COMPRA_MODERADA"})]
+    sem_balanco, sem_sinal = sem_sinal_por_motivo(amostras, avaliacoes)
+    assert sem_balanco == ["SEMBAL3"]
+    assert sem_sinal == ["PREJUIZO3"]
