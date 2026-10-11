@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from app.validacao.avaliador import Pregao
+from app.validacao.confianca import AmostraConfianca
 from app.validacao.diario import (
     DiarioDeSinais,
     abertura_em_utc,
@@ -93,6 +94,17 @@ class _RepoFake:
 
     def inserir_resultado(self, db, sinal_id, resultado):
         self.resultados[(sinal_id, resultado.horizonte)] = resultado
+
+    def amostras_confianca(self, db, **_) -> list[AmostraConfianca]:
+        amostras = []
+        for sinal in self.sinais:
+            score = sinal.get("confianca_score")
+            if score is None:
+                continue
+            for (sid, _h), r in self.resultados.items():
+                if sid == sinal["id"]:
+                    amostras.append(AmostraConfianca(score, r.acerto))
+        return amostras
 
 
 def diario(repo, horizontes=(21, 63, 126)):
@@ -282,3 +294,48 @@ def test_avaliacao_usa_a_carteira_e_o_cdi_quando_existem():
     assert resultado.excesso_carteira == Decimal("0")  # andou igual a carteira
     assert resultado.retorno_cdi > 0
     assert resultado.excesso_cdi < 0  # preco parado perde para o CDI
+
+
+# --- curva de confianca (TASK-53) -------------------------------------------
+
+def test_avaliar_retorna_curva_confianca_sem_evidencia_quando_sem_confianca_score():
+    """Sinal sem confianca_score: curva existe mas direcionais=0."""
+    repo = _RepoFake()
+    repo.candles["PETR4"] = pregoes(SEXTA, 25)
+    repo.sinais = [{"id": 1, "simbolo": "PETR4", "data_pregao": SEXTA,
+                    "recomendacao": "COMPRA_FORTE", "confianca_score": None}]
+    d, _ = diario(repo, horizontes=(21,))
+
+    resumo = d.avaliar()
+
+    assert resumo.curva_confianca is not None
+    assert resumo.curva_confianca.tem_evidencia_real is False
+
+
+def test_avaliar_curva_agrega_score_e_acerto_dos_sinais_avaliados():
+    """Score 80 com acerto True deve aparecer na faixa 80-99 da curva."""
+    repo = _RepoFake()
+    repo.candles["PETR4"] = pregoes(SEXTA, 25)
+    repo.sinais = [{"id": 1, "simbolo": "PETR4", "data_pregao": SEXTA,
+                    "recomendacao": "COMPRA_FORTE", "confianca_score": 80}]
+    d, _ = diario(repo, horizontes=(21,))
+    d.avaliar()  # grava resultado em repo.resultados
+
+    resumo = d.avaliar()  # na segunda passada nao grava nada novo, mas computa curva
+
+    assert resumo.curva_confianca is not None
+    assert resumo.curva_confianca.tem_evidencia_real is True
+    faixa_alta = next(f for f in resumo.curva_confianca.faixas if f.faixa == "80-99")
+    assert faixa_alta.total >= 1
+    assert faixa_alta.direcionais >= 1
+
+
+def test_avaliar_curva_sem_sinais_pendentes_ainda_computa():
+    """Sem nada a avaliar, a curva ainda e calculada (pode ter historico)."""
+    repo = _RepoFake()
+    d, _ = diario(repo, horizontes=(21,))
+
+    resumo = d.avaliar()
+
+    assert resumo.curva_confianca is not None
+    assert resumo.curva_confianca.total == 0
