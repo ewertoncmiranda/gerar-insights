@@ -725,3 +725,22 @@ Gerar, dentro do fluxo existente do diário operacional, uma visão por ticker q
 - `confianca_score` sem curva real deve aparecer como `NAO_CALIBRADA`.
 - Sinal técnico só pode virar parte da recomendação principal após DEC com placar real e IC favorável.
 - A tese deve sempre incluir o aviso de simulação e os dados que podem invalidá-la.
+
+---
+
+## Plano OPT: trava para uso decisório de opções (2026-10-12)
+
+**Status:** EM ANDAMENTO · **Contexto comum:** ver `infra-b3-ecossytem/SPEC.md`, Plano OPT. A base `opcao_b3_diaria` atual está suspeita/contaminada; o worker de insights não deve usar opções para sinal, tese, confiança, backtest ou operação simulada até ETL, infra e gestor concluírem a validação da cadeia.
+
+### Regras para agentes
+
+- Não implementar estratégia de opções neste repositório antes de `gestor#OPT-GES-3` expor saúde válida e `infra#OPT-INFRA-2` sanear a base antiga.
+- Se alguma feature precisar citar opções, usar apenas como ausência/risco pedagógico: `CADEIA_OPCOES_NAO_VALIDADA`.
+- IDs `OPT-INS-*` são reservados; não renomear.
+
+### Tarefas desta aplicação
+
+| ID | Tarefa | Depende de | Aceite | Status |
+|---|---|---|---|---|
+| OPT-INS-1 | Bloquear consumo decisório de opções até cadeia validada | infra#OPT-INFRA-2, gestor#OPT-GES-3 | Nenhum backtest, tese, consenso ou sizing usa `opcao_b3_diaria` enquanto a saúde não indicar cadeia válida; quando citado, aparece como risco/ausência | IMPLEMENTADO (2026-10-12): `app/operacional/opcoes.py` centraliza a trava pura; `avaliar_uso_decisorio()` retorna `CADEIA_OPCOES_NAO_VALIDADA` quando a saúde está ausente, contaminada, sem registros válidos, com legado não validado ou percentual válido zero; testes cobrem contrato camelCase e snake_case |
+| OPT-INS-2 | Definir DEC futura para eventual uso de opções em simulação | OPT-INS-1 | SPEC registra critérios mínimos: cadeia válida, liquidez, spread/custo, payoff, margem/risco e comparação com alternativa simples | IMPLEMENTADO COMO DEC (2026-10-12): uso futuro só pode avançar com `status=OK`/`CADEIA_VALIDADA`, registros válidos > 0, legado não validado = 0, percentual válido > 0, liquidez mínima por contrato, spread/custo explícito, payoff e margem/risco modelados e comparação contra alternativa simples sem opções |
