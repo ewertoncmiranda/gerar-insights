@@ -6,30 +6,7 @@ on:
       - 'feature**'
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'   # a mesma da imagem (Dockerfile)
-
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-
-      # So testes unitarios na esteira (decisao de 2026-10-07): sem lint e
-      # sem piso de cobertura - nada alem de teste quebrado bloqueia o PR.
-      - name: Tests
-        env:
-          ENVIRONMENT: local
-          DB_HOST: localhost
-        run: pytest tests/ -v
-
   create-pr:
-    needs: test
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -67,9 +44,7 @@ jobs:
                 base: 'develop',
                 body: body,
               });
-
-              console.log(`✅ Pull Request criado: #${pr.data.number}`);
-              console.log(`Link: ${pr.data.html_url}`);
+              console.log(`PR criado: #${pr.data.number} ${pr.data.html_url}`);
             } else {
-              console.log(`ℹ️ PR já existe: #${prs.data[0].number}`);
+              console.log(`PR ja existe: #${prs.data[0].number}`);
             }

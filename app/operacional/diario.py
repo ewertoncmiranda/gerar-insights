@@ -413,6 +413,7 @@ def main() -> int:
     from app.config.config_logger import setup_logger  # noqa: PLC0415
     from app.config.database_config import ConfigDatabase  # noqa: PLC0415
     from app.operacional.eventos import publicar_pendentes  # noqa: PLC0415
+    from app.operacional.eventos_v2 import publicar_pendentes_v2  # noqa: PLC0415
 
     logger = setup_logger()
     db_config = ConfigDatabase()
@@ -421,7 +422,8 @@ def main() -> int:
                 len(resumo.pregoes), resumo.abertas, resumo.fechadas, resumo.pendentes, resumo.canceladas)
     with db_config.session() as db:
         publicacao = publicar_pendentes(db)
-    logger.info("Eventos operacionais | %s", publicacao)
+        publicacao_v2 = publicar_pendentes_v2(db)
+    logger.info("Eventos operacionais | v1 %s | v2 %s", publicacao, publicacao_v2)
     return 0
 
 

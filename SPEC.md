@@ -708,7 +708,7 @@ Gerar, dentro do fluxo existente do diário operacional, uma visão por ticker q
 | OPRV2-INS-3 | Criar “tese explicada”: fatores positivos, negativos, riscos, dados ausentes, eventos recentes e gatilhos de invalidação em linguagem de negócio | `app/operacional/tese.py` | etl#OPRV2-ETL-2..3, OPRV2-INS-2 | Cada tese contém listas `positivos`, `negativos`, `riscos`, `invalidadores` e `dadosAusentes`, todas com código estável | IMPLEMENTADO NO CÓDIGO (2026-10-11): tese inclui aviso de simulação, positivos/negativos/riscos/dados ausentes/invalidadores; confiança sem curva real vira risco `CONFIANCA_NAO_CALIBRADA` |
 | OPRV2-INS-4 | Gerar timeline operacional do ticker: mudanças de sinal, posição aberta/fechada, bloqueio, evento CVM, provento, salto sem evento, mudança de confiança e alerta de risco | `app/operacional/timeline.py`, `app/operacional/v2.py` | infra#OPRV2-INFRA-2, etl#OPRV2-ETL-2, OPR-INS-7 | Reprocessar mesmo pregão não duplica eventos; timeline ordena por data e severidade | IMPLEMENTADO NO CÓDIGO (2026-10-11): timeline deduplica por evento/tipo/símbolo/data, classifica severidade e é persistida com `INSERT IGNORE` quando a tabela V2 existir |
 | OPRV2-INS-5 | Calibrar visualmente a confiança: transformar `confianca_score` em faixa (`ALTA`, `MEDIA`, `BAIXA`, `NAO_CALIBRADA`) usando curva real quando existir; enquanto não existir, sinalizar “não calibrada” | TASK-53, infra#TASK-33 | Snapshot nunca apresenta score como comprovado sem curva real; SPEC registra DEC quando calibrar/remover | EM ANDAMENTO (2026-10-11): `TASK-53` já extrai curva real do diário e explicita ausência de evidência; snapshot V2 ainda deve exibir `NAO_CALIBRADA` até execução real + DEC |
-| OPRV2-INS-6 | Publicar eventos V2 (`snapshot-ticker`, `consenso-sinais`, `tese-explicada`, `timeline-ativo`, `alerta-ux`) validados pelos contratos da infra | infra#OPRV2-INFRA-1, OPRV2-INS-1..4 | Payload passa nos JSON Schemas e não conhece Telegram/painel diretamente | EM ANDAMENTO (Claude Sessão 01/feature-migrate, 2026-10-11) |
+| OPRV2-INS-6 | Publicar eventos V2 (`snapshot-ticker`, `consenso-sinais`, `tese-explicada`, `timeline-ativo`, `alerta-ux`) validados pelos contratos da infra | infra#OPRV2-INFRA-1, OPRV2-INS-1..4 | Payload passa nos JSON Schemas e não conhece Telegram/painel diretamente | IMPLEMENTADO (2026-10-11): `eventos_v2.py` projeta somente campos contratados, valida JSON Schema, grava outbox idempotente em `evento_operacional_v2` e publica pendentes na fila `sqs-eventos-operacionais-v2` dentro do diário operacional, sem comando novo. Teste unitário novo cobre projeção, rejeição de payload inválido e envelope SQS |
 
 ### Dependências para consumidores
 
@@ -725,3 +725,22 @@ Gerar, dentro do fluxo existente do diário operacional, uma visão por ticker q
 - `confianca_score` sem curva real deve aparecer como `NAO_CALIBRADA`.
 - Sinal técnico só pode virar parte da recomendação principal após DEC com placar real e IC favorável.
 - A tese deve sempre incluir o aviso de simulação e os dados que podem invalidá-la.
+
+---
+
+## Plano OPT: trava para uso decisório de opções (2026-10-12)
+
+**Status:** EM ANDAMENTO · **Contexto comum:** ver `infra-b3-ecossytem/SPEC.md`, Plano OPT. A base `opcao_b3_diaria` atual está suspeita/contaminada; o worker de insights não deve usar opções para sinal, tese, confiança, backtest ou operação simulada até ETL, infra e gestor concluírem a validação da cadeia.
+
+### Regras para agentes
+
+- Não implementar estratégia de opções neste repositório antes de `gestor#OPT-GES-3` expor saúde válida e `infra#OPT-INFRA-2` sanear a base antiga.
+- Se alguma feature precisar citar opções, usar apenas como ausência/risco pedagógico: `CADEIA_OPCOES_NAO_VALIDADA`.
+- IDs `OPT-INS-*` são reservados; não renomear.
+
+### Tarefas desta aplicação
+
+| ID | Tarefa | Depende de | Aceite | Status |
+|---|---|---|---|---|
+| OPT-INS-1 | Bloquear consumo decisório de opções até cadeia validada | infra#OPT-INFRA-2, gestor#OPT-GES-3 | Nenhum backtest, tese, consenso ou sizing usa `opcao_b3_diaria` enquanto a saúde não indicar cadeia válida; quando citado, aparece como risco/ausência | IMPLEMENTADO (2026-10-12): `app/operacional/opcoes.py` centraliza a trava pura; `avaliar_uso_decisorio()` retorna `CADEIA_OPCOES_NAO_VALIDADA` quando a saúde está ausente, contaminada, sem registros válidos, com legado não validado ou percentual válido zero; testes cobrem contrato camelCase e snake_case |
+| OPT-INS-2 | Definir DEC futura para eventual uso de opções em simulação | OPT-INS-1 | SPEC registra critérios mínimos: cadeia válida, liquidez, spread/custo, payoff, margem/risco e comparação com alternativa simples | IMPLEMENTADO COMO DEC (2026-10-12): uso futuro só pode avançar com `status=OK`/`CADEIA_VALIDADA`, registros válidos > 0, legado não validado = 0, percentual válido > 0, liquidez mínima por contrato, spread/custo explícito, payoff e margem/risco modelados e comparação contra alternativa simples sem opções |

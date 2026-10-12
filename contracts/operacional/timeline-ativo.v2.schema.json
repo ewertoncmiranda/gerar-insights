@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/timeline-ativo.v2.schema.json",
+  "title": "Evento de timeline do ativo v2",
+  "$ref": "comum.v2.schema.json#/$defs/timelineItem"
+}

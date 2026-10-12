@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/tese-explicada.v2.schema.json",
+  "title": "Tese explicada v2",
+  "$ref": "comum.v2.schema.json#/$defs/tese"
+}

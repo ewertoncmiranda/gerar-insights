@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.b3-ecossistema.local/operacional/comum.v2.schema.json",
+  "title": "Definicoes comuns dos contratos operacional.*.v2",
+  "$defs": {
+    "simbolo": { "type": "string", "pattern": "^[A-Z0-9]{4}[0-9]{1,2}F?$" },
+    "versaoRegra": { "type": "string", "pattern": "^OPR-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9]+$" },
+    "statusOperacional": {
+      "anyOf": [
+        { "$ref": "status-sistema.v1.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "faixaLiquidez": {
+      "anyOf": [
+        { "enum": ["ALTA", "MEDIA", "INSUFICIENTE"] },
+        { "type": "null" }
+      ]
+    },
+    "sinal": {
+      "anyOf": [
+        { "enum": [
+          "COMPRA_FORTE", "COMPRA_MODERADA", "COMPRA_TECNICA", "SINAL_POSITIVO_FORTE",
+          "SINAL_POSITIVO", "SINAL_NEGATIVO", "SINAL_NEUTRO", "VENDA_VALUATION", "VENDA_TECNICA",
+          "ALERTA_RISCO", "MANTER", "SEM_DADOS", "SEM_BASE", "SEM_MARGEM", "NEUTRO", "NEUTRO_TECNICO"
+        ] },
+        { "type": "null" }
+      ]
+    },
+    "motivoBloqueio": {
+      "type": "object",
+      "required": ["codigo"],
+      "properties": {
+        "codigo": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "descricao": { "type": "string" },
+        "detalhe": { "type": "string" },
+        "valor": { "type": ["number", "string", "null"] },
+        "limite": { "type": ["number", "string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "consenso": {
+      "type": "object",
+      "required": ["direcaoAnalitica", "operabilidade", "resumo", "sinais", "divergencias"],
+      "properties": {
+        "direcaoAnalitica": { "enum": ["POSITIVA", "NEGATIVA", "NEUTRA_OU_MISTA"] },
+        "operabilidade": { "enum": ["OPERAVEL", "NAO_OPERAVEL"] },
+        "resumo": { "type": "string", "minLength": 1 },
+        "sinais": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["fonte", "valor", "direcao", "peso", "detalhe"],
+            "properties": {
+              "fonte": { "enum": ["REGRA_PRINCIPAL", "TECNICO_MOMENTUM", "TECNICO_REVERSAO", "REGRA_V2_SOMBRA", "OPINIAO_IA"] },
+              "valor": { "type": ["string", "null"] },
+              "direcao": { "enum": ["POSITIVO", "NEGATIVO", "NEUTRO", "AUSENTE", "DESCONHECIDO"] },
+              "peso": { "type": "integer", "minimum": 0 },
+              "detalhe": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "divergencias": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["codigo", "descricao"],
+            "properties": {
+              "codigo": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+              "descricao": { "type": "string", "minLength": 1 },
+              "motivos": { "type": "array", "items": { "$ref": "#/$defs/motivoBloqueio" } }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "teseItem": {
+      "type": "object",
+      "required": ["codigo", "descricao", "severidade"],
+      "properties": {
+        "codigo": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "descricao": { "type": "string", "minLength": 1 },
+        "severidade": { "enum": ["BAIXA", "MEDIA", "ALTA"] }
+      },
+      "additionalProperties": false
+    },
+    "tese": {
+      "type": "object",
+      "required": ["aviso", "positivos", "negativos", "riscos", "invalidadores", "dadosAusentes"],
+      "properties": {
+        "aviso": { "type": "string", "minLength": 20 },
+        "positivos": { "type": "array", "items": { "$ref": "#/$defs/teseItem" } },
+        "negativos": { "type": "array", "items": { "$ref": "#/$defs/teseItem" } },
+        "riscos": { "type": "array", "items": { "$ref": "#/$defs/teseItem" } },
+        "invalidadores": { "type": "array", "items": { "$ref": "#/$defs/teseItem" } },
+        "dadosAusentes": { "type": "array", "items": { "$ref": "#/$defs/teseItem" } }
+      },
+      "additionalProperties": false
+    },
+    "timelineItem": {
+      "type": "object",
+      "required": ["eventId", "simbolo", "data", "tipo", "severidade", "categoria", "titulo", "payload"],
+      "properties": {
+        "eventId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "simbolo": { "$ref": "#/$defs/simbolo" },
+        "data": { "type": "string", "format": "date" },
+        "tipo": { "enum": ["SINAL_GERADO", "POSICAO_ABERTA", "POSICAO_FECHADA", "BLOQUEIO_DADO", "BLOQUEIO_LIQUIDEZ", "DIARIO_AVALIADO", "ALERTA_RISCO"] },
+        "severidade": { "enum": ["INFO", "ATENCAO", "CRITICO"] },
+        "categoria": { "enum": ["DADO", "LIQUIDEZ", "RISCO", "EVENTO", "SINAL", "SISTEMA"] },
+        "titulo": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "payload": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "alerta": {
+      "type": "object",
+      "required": ["id", "ativo", "severidade", "categoria", "simbolo", "titulo", "dataEvento", "createdAt", "payload"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "ativo": { "const": true },
+        "severidade": { "enum": ["INFO", "ATENCAO", "CRITICO"] },
+        "categoria": { "enum": ["DADO", "LIQUIDEZ", "RISCO", "EVENTO", "SINAL", "SISTEMA"] },
+        "simbolo": { "anyOf": [{ "$ref": "#/$defs/simbolo" }, { "type": "null" }] },
+        "titulo": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "dataEvento": { "type": ["string", "null"], "format": "date" },
+        "createdAt": { "type": ["string", "null"], "format": "date-time" },
+        "payload": { "type": ["object", "null"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}
