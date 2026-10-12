@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.external.database.cotahist_repository import RepositorioCotahist
 
-VERSAO_ESTRATEGIA = "BAIXO_SPREAD_2026.10.12-1"
+VERSAO_ESTRATEGIA = "BAIXO_SPREAD_v1"
 
 
 @dataclass
@@ -170,6 +170,8 @@ class BaixoSpreadService:
             resultado.quintil = (i * 5) // n + 1
 
     def _gravar_resultado(self, db: Session, resultado: ResultadoBaixoSpread) -> bool:
+        if resultado.score is None:
+            return False
         existente = db.execute(
             text(
                 "SELECT id FROM simulador_resultado "

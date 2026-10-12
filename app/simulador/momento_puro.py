@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.external.database.cotahist_repository import RepositorioCotahist
 
-VERSAO_ESTRATEGIA = "MOMENTO_PURO_2026.10.12-1"
+VERSAO_ESTRATEGIA = "MOMENTO_PURO_v1"
 # Retorno 12-1 meses: ~252 pregões (12 meses) - ~21 pregões (1 mês) = ~231 pregões
 JANELA_MESES_12 = 252
 JANELA_MESES_1 = 21
