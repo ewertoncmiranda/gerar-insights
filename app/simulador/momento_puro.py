@@ -69,8 +69,9 @@ class MomentoPuroService:
         simbolos = {a["simbolo"] for a in ativos}
         self._logger.info("MOMENTO_PURO: %d ativos monitorados", len(simbolos))
 
-        # Ler série histórica para o cálculo de retorno 12-1
-        desde = dia - timedelta(days=JANELA_MESES_12 + 30)  # Margem para dias sem pregão
+        # Ler série histórica para o cálculo de retorno 12-1.
+        # JANELA_MESES_12 = 252 pregões ≈ 365 dias calendário; +60 de margem.
+        desde = dia - timedelta(days=int(JANELA_MESES_12 * 365 / 252) + 60)
         series = self._cotahist.series(db, simbolos, desde, dia)
 
         # Calcular retorno 12-1 para cada ativo
