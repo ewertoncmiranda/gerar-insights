@@ -744,3 +744,23 @@ Gerar, dentro do fluxo existente do diário operacional, uma visão por ticker q
 |---|---|---|---|---|
 | OPT-INS-1 | Bloquear consumo decisório de opções até cadeia validada | infra#OPT-INFRA-2, gestor#OPT-GES-3 | Nenhum backtest, tese, consenso ou sizing usa `opcao_b3_diaria` enquanto a saúde não indicar cadeia válida; quando citado, aparece como risco/ausência | IMPLEMENTADO (2026-10-12): `app/operacional/opcoes.py` centraliza a trava pura; `avaliar_uso_decisorio()` retorna `CADEIA_OPCOES_NAO_VALIDADA` quando a saúde está ausente, contaminada, sem registros válidos, com legado não validado ou percentual válido zero; testes cobrem contrato camelCase e snake_case |
 | OPT-INS-2 | Definir DEC futura para eventual uso de opções em simulação | OPT-INS-1 | SPEC registra critérios mínimos: cadeia válida, liquidez, spread/custo, payoff, margem/risco e comparação com alternativa simples | IMPLEMENTADO COMO DEC (2026-10-12): uso futuro só pode avançar com `status=OK`/`CADEIA_VALIDADA`, registros válidos > 0, legado não validado = 0, percentual válido > 0, liquidez mínima por contrato, spread/custo explícito, payoff e margem/risco modelados e comparação contra alternativa simples sem opções |
+
+---
+
+## Plano SIM: estratégias exclusivas do Simulador (2026-10-12)
+
+**Status:** IMPLEMENTADO NO CÓDIGO · **Contexto:** ver `painel-ativos-frontend/SPEC.md`, Plano SIM. As estratégias MOMENTO_PURO e BAIXO_SPREAD são exclusivas do simulador — não entram no `BacktestRanking` nem no backtest de sexta. Os scores são gravados diretamente em `simulador_resultado` pela rotina da manhã.
+
+### Regras para agentes
+
+- Não adicionar `MOMENTO_PURO` nem `BAIXO_SPREAD` em `VERSOES` do `backtest_ranking.py`.
+- Gravar em `simulador_resultado` com `versao_estrategia` exato; nunca em `backtest_execucao`.
+- IDs `SIM-INS-*` são reservados; não renomear.
+
+### Tarefas desta aplicação
+
+| ID | Tarefa | Arquivos | Depende | Aceite | Status |
+|---|---|---|---|---|---|
+| SIM-INS-1 | Calcular e gravar score diário da estratégia `MOMENTO_PURO` (retorno 12-1 meses sem filtro de valor) em `simulador_resultado` para todos os ativos da `simulador_ativo` | `app/simulador/momento_puro.py` | infra#SIM-INFRA-2 | Score calculado por ativo monitorado; idempotente (mesmo pregão não duplica); roda na etapa diária da rotina da manhã | IMPLEMENTADO (2026-10-12): `MomentoPuroService` calcula retorno 12-1 meses usando COTAHIST, quintis (1-5) por ranking e grava em `simulador_resultado` com `versao_estrategia=MOMENTO_PURO_2026.10.12-1`; integrado em `cargas-etl.ps1` como "estratégias do simulador" |
+| SIM-INS-2 | Calcular e gravar score diário da estratégia `BAIXO_SPREAD` (spread Corwin-Schultz V24 como critério principal, Graham como desempate) em `simulador_resultado` | `app/simulador/baixo_spread.py` | infra#SIM-INFRA-2, V24 spread | Score depende de `spread_estimado_63d` da V24; ativo sem spread gravado recebe quintil `null` | IMPLEMENTADO (2026-10-12): `BaixoSpreadService` lê `ativo_liquidez_diaria.spread_estimado_63d`, usa menor spread como melhor ranking, aplica margem Graham do último insight apenas como desempate pequeno e grava `BAIXO_SPREAD_2026.10.12-1`, inclusive com score/quintil nulos quando não há spread; integrado ao `app.simulador` existente |
+| SIM-INS-3 | Testes unitários das duas estratégias | `tests/simulador/test_momento_puro.py`, `tests/simulador/test_baixo_spread.py` | SIM-INS-1, SIM-INS-2 | Ativo sem dados suficientes recebe `null`, não erro; score muda quando input muda | IMPLEMENTADO (2026-10-12): testes cobrem ausência de dados/spread, retorno 12-1, quintis, desempate por Graham, idempotência e execução das duas estratégias pela etapa diária; cálculo do MOMENTO_PURO ajustado para usar o último fechamento disponível antes dos cortes 12m e 1m |
