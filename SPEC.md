@@ -774,3 +774,49 @@ Esta aplicação não é fonte nem consumidora de cadastro, propriedade, operaç
 | OPDB-INS-1 | Preservar o gate de qualidade das opções | Manter `OPT-INS-1` como bloqueio explícito para qualquer estratégia que consuma opções; documentar e testar o comportamento com cadeia ausente, vencida ou inválida | OPDB-INFRA-1, OPDB-ETL-1, OPDB-GES-1 | Nenhum insight de opções é publicado sem cadeia válida, atual e com tipo call/put coerente; demais estratégias permanecem independentes | PLANEJADO |
 
 Não adicionar integração de Carteiras, ordens ou posições reais nesta fase. O plano coordenador, contratos comuns, critérios globais de aceite e sequência sem concorrência por arquivos estão em `infra-b3-ecossytem/SPEC.md` (seção OPDB/CARTDB).
+
+---
+
+## Plano SINAIS: sinais das fontes públicas, só entram no score se vencerem o backtest (2026-10-21)
+
+**Status:** PLANEJADO · **Rótulo das tarefas:** `SINAIS-INS-*`, reservado · **Contexto:** Plano consolidado CONS no hub (`infra-b3-ecossytem/SPEC.md`). Substitui a tarefa `FONTES-GES-5`, que estava no serviço errado: o score, a regra de recomendação (`VERSAO_REGRA`) e o backtest walk-forward ficam neste repositório; o gestor só lê o placar (`/validacao/backtest`).
+
+**Princípio:** nenhum sinal novo muda a recomendação. Cada um entra como **fator medido em modo sombra**, com hipótese registrada antes de rodar (LAC-INS-8) e só é promovido pelos critérios de LAC-INS-9. Hoje o resultado de pesquisa é "backtest sem vantagem distinguível" (DEC-07/08/09): a expectativa honesta é que alguns sinais não passem, e isso é um resultado válido.
+
+### Quais sinais são testáveis
+
+| Sinal | Fonte | Histórico point-in-time | Testável |
+|---|---|---|---|
+| Prêmio de risco = earnings yield − juro real da NTN-B de referência (~5 anos, DEC-FONTES-3) | `titulo_publico_taxa` (V45, etapa TESOURO), `indicador_fundamentalista`/LPA | Taxas desde 2002; LPA pela data de entrega | Sim |
+| Compra líquida de administradores (3, 6 e 12 meses) | `cvm_negociacao_administrador` (V45, etapa CVM_VLMO) | Movimentações desde 2018, vale a partir de `data_entrega` | Sim, depois da carga do VLMO |
+| Recompra líquida (variação do saldo de ações em tesouraria) | `fato_contabil` BPP, contas 2.03.02.05/2.03.04.09 (bancos 2.07.01.02.05/2.07.01.04.09; plano 2.08.02.05/2.08.04.09) | Histórico de balanços já na base, pela data de entrega | Sim, já |
+| Selos de cadastro, auditor, dívida, fundos (FONTES-GES-4) | `cvm_cadastro`, `cvm_auditor`, `fundo_posicao_acao` | **Só o retrato atual**, sem série | **Não**: ficam informativos no painel, fora do score |
+
+### Tarefas desta aplicação
+
+| ID | Tarefa | Arquivos (posse exclusiva) | Depende | Aceite | Status |
+|---|---|---|---|---|---|
+| SINAIS-INS-1 | Fator prêmio de risco contra a NTN-B (função pura, point-in-time) | novo `app/fatores/premio_ntnb.py`; `tests/test_fator_premio_ntnb.py` | — **independente** (lê `titulo_publico_taxa` quando a V45 estiver aplicada) | Para (símbolo, data): earnings yield com LPA vigente na data (entrega ≤ data) menos a taxa de compra da NTN-B de referência do dia (vencimento mais perto de 5 anos; mesma regra do ETL). Sem NTN-B no dia, usa a última anterior até 5 dias úteis; senão `None`. Nunca usa dado posterior à data | PLANEJADO |
+| SINAIS-INS-2 | Fator compra líquida de administradores | novo `app/fatores/insiders.py`; `tests/test_fator_insiders.py` | — **independente** (lê `cvm_negociacao_administrador`) | Compra líquida em quantidade sobre (compras + vendas) em 6 meses, só com `data_entrega ≤ data`, só Compra/Venda à vista e Compra a termo de Ações e Units (regras de `docs/fontes/FONTES-ETL-1.md` do ETL); última versão por (CNPJ, referência). Sem movimentos = `None`, nunca 0 | PLANEJADO |
+| SINAIS-INS-3 | Fator recompra líquida | novo `app/fatores/recompra.py`; `tests/test_fator_recompra.py` | — **independente** (lê `fato_contabil`) | Variação do saldo de tesouraria entre balanços consecutivos pela data de entrega, em % do patrimônio líquido; empresas, bancos e plano 2.08 pelas contas próprias; consolidado prevalece. Variação positiva do saldo é recompra; a negativa (cancelamento ou entrega a plano) não conta como venda | PLANEJADO |
+| SINAIS-INS-4 | Integrar os três fatores ao cálculo mensal de fatores (sem mudar a recomendação) | `app/fatores/servico.py`, `app/fatores/repositorio.py` (donos exclusivos); testes `tests/test_fatores_lac.py` só acrescentando casos | SINAIS-INS-1, 2, 3 | Fatores `premio_ntnb`, `insider_6m`, `recompra_12m` calculados por (símbolo, mês) usando só dados até o pregão de referência (teste "sem olhar o futuro" como em LAC-INS-5). **Schema**: se a tabela de fatores não aceitar fatores novos sem alteração, NÃO criar tabela aqui; registrar o pedido de migration (V46) no hub e parar. A recomendação, o payload e `VERSAO_REGRA` não mudam | PLANEJADO |
+| SINAIS-INS-5 | Hipóteses pré-registradas e medição por ranking | `app/validacao/backtest_ranking.py` (só ACRESCENTAR as três famílias de score), `tests/test_backtest_ranking.py` (só acrescentar); `docs/sinais/SINAIS-INS-5.md` | SINAIS-INS-4; dados carregados (TESOURO e CVM_VLMO rodados pela API de cargas) | Antes de rodar, gravar em `backtest_execucao.hipotese`: H1 prêmio alto → retorno seguinte acima do universo; H2 compra líquida de insiders → retorno acima em 3 e 6 meses; H3 recompra → retorno acima. `numero_tentativa` por família; a melhor de N tentativas precisa superar o limiar corrigido por N (LAC-INS-8). Janelas sucessivas, teste de 12 meses; relatório por sinal: correlação de ranking com intervalo de 95%, quintil 5 menos quintil 1 depois de custos (0,1% ida e volta) | PLANEJADO |
+| SINAIS-INS-6 | Regra v3 em modo sombra | `app/validacao/backtest.py` (acrescentar a regra ao mapa de regras; sem alterar `VERSAO_REGRA`), `app/core/analysis/regra_v3_sombra.py` | SINAIS-INS-5 | A v3 combina o score da v2 com os sinais que **não foram descartados** em SINAIS-INS-5, medida lado a lado com a v2 nas mesmas janelas e no diário ao vivo. Não é publicada no payload nem altera a recomendação oficial | PLANEJADO |
+| SINAIS-INS-7 | Decisão de promoção | `docs/sinais/SINAIS-INS-7.md` (relatório); só se promovida: `app/core/analysis/versao_regra.py` e `recommendation.py`, em tarefa própria **aprovada pelo usuário** | SINAIS-INS-6 e critérios LAC-INS-9 | Relatório com os 4 critérios de LAC-INS-9 para cada sinal: (1) intervalo de 95% da correlação média acima de zero; (2) quintil 5 − 1 positivo depois de custos; (3) alfa contra os fatores de referência não negativo; (4) diário ao vivo sem contradição. Sinal que falha em qualquer critério fica fora, documentado. Promoção nunca é automática | PLANEJADO |
+
+### Ordem e paralelismo
+
+| Onda | Tarefas | Observação |
+|---|---|---|
+| 0 | SINAIS-INS-1, 2, 3 | Três arquivos novos, sem dependência entre si |
+| 1 | SINAIS-INS-4 | Único dono de `servico.py` e `repositorio.py`; confirma antes se o schema comporta fatores novos |
+| 2 | SINAIS-INS-5 | Exige TESOURO e CVM_VLMO carregados (FONTES-ETL-8) e a V45 aplicada |
+| 3 | SINAIS-INS-6, depois 7 | Em sequência: a decisão usa o resultado da sombra |
+
+### Limites e riscos
+
+- **Poder estatístico:** o VLMO só começa em 2018; com janelas de teste de 12 meses, a evidência de insiders será fraca. O relatório deve dizer isso em vez de forçar uma conclusão.
+- **Múltiplas tentativas:** três hipóteses novas aumentam o risco de achar um falso positivo; o limiar corrigido por N é obrigatório.
+- **Banco:** para bancos (DEC-FONTES-1, P/VP × ROE e Basileia) o prêmio contra a NTN-B usa o mesmo earnings yield; avaliar bancos separadamente no relatório, sem misturar com o resto do universo.
+- **Dado ao vivo:** o diário de sinais só começa a vencer horizontes no fim de outubro de 2026; o critério (4) de LAC-INS-9 pode ficar pendente.
+- Os selos do painel (cadastro, auditor, fundos, dívida) seguem como informação, **fora do score**, por falta de série histórica.
